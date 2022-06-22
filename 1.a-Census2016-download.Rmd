@@ -1,0 +1,178 @@
+---
+title: "Downloading Census data"
+author: "Sandrine Njoo & Dave Campbell"
+date: "20/10/2021"
+output: html_document
+---
+# Goal
+Download 2016 census data about population counts in locations.  Then convert this document into a script to loop over provinces and extract dissemination area information from the census.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library, warning = FALSE, message = FALSE}
+#using R:
+library(plyr)       # recoding factor levels using 'mapvalues'  
+library(tidyverse)  # data manipulation and piping
+library(data.table) # renaming columns in bulk using 'setnames'
+library(sf)         # to handle census subdivision polygons
+
+# set up data location:
+location = "C:/Users/wher/OneDrive - Bank of Canada/MyDocs/git"
+
+version
+```
+
+```{r, warning = FALSE, message = FALSE}
+source('apikey.R')
+
+```
+
+## Set Up Province Code Mapping
+
+Following the codings from [StatCan](https://www12.statcan.gc.ca/census-recensement/2016/ref/dict/tab/t1_8-eng.cfm).  This could be pulled directly from the html page, but it's a one time need and a small table so it is pasted below. 
+
+
+```{r province_codings}
+
+province_codings = matrix(c("Newfoundland and Labrador",	"NL",	"10",	"Atlantic",
+      "Prince Edward Island",	"PE",	"11",	"Atlantic",
+      "Nova Scotia",	"NS",	"12",	"Atlantic",
+      "New Brunswick",	"NB",	"13",	"Atlantic",
+      "Quebec",	"QC",	"24",	"Quebec",
+      "Ontario",	"ON",	"35",	"Ontario",
+      "Manitoba",	"MB",	"46",	"Prairies",
+      "Saskatchewan",	"SK",	"47",	"Prairies",
+      "Alberta",	"AB",	"48",	"Prairies",
+      "British Columbia",	"BC",	"59",	"British Columbia",
+      "Yukon",		"YT",	"60",	"Territories",
+      "Northwest Territories",	"NT",	"61",	"Territories",
+      "Nunavut",	"NU",	"62", "Territories"),
+      ncol=4,byrow=TRUE, 
+      dimnames = list(NULL, c("province", "abv", "code","region"))) %>%
+  as_tibble(province_codings)
+
+
+```
+
+
+# Pull the 2016 census data for a province
+
+```{r, cache = TRUE,  message = FALSE, warning=FALSE, quiet = TRUE}
+
+#all the PEI regions by calling the province:
+Province = "PE"
+
+
+
+
+prov_code = province_codings %>% filter(abv == Province) %>% select(code)
+regions=list(PR=prov_code)
+
+#vectors that are relevant to industry
+vectors_ind = c("v_CA16_5702","v_CA16_5705","v_CA16_5708","v_CA16_5711","v_CA16_5714","v_CA16_5717","v_CA16_5720","v_CA16_5723","v_CA16_5726","v_CA16_5729","v_CA16_5732","v_CA16_5735","v_CA16_5738","v_CA16_5741","v_CA16_5744","v_CA16_5747","v_CA16_5750","v_CA16_5753","v_CA16_5756","v_CA16_5759")
+
+# pull from the census.  Use geo_format='sf' to also obtain the census boundary polygons and level = 'CSD' to extract the regions
+census_data_ind <- get_census(dataset='CA16', regions=regions, vectors=vectors_ind, labels="detailed", geo_format='sf', level='CSD')
+
+```
+
+
+
+```{r, cache = TRUE, eval=FALSE,  message = FALSE, warning=FALSE}
+
+#this is for all the possible variables in the 25% census data sample
+
+#all the vectors for the 25% census
+vectors_all=c("v_CA16_4951","v_CA16_4954","v_CA16_4960","v_CA16_4966","v_CA16_4972","v_CA16_4978","v_CA16_6751","v_CA16_6754","v_CA16_4984","v_CA16_4987","v_CA16_4990","v_CA16_4993","v_CA16_4996","v_CA16_4999","v_CA16_5002","v_CA16_5005","v_CA16_2601","v_CA16_2604","v_CA16_2613","v_CA16_2616","v_CA16_3390","v_CA16_3405","v_CA16_3438","v_CA16_3456","v_CA16_3636","v_CA16_3819","v_CA16_3831","v_CA16_3852","v_CA16_3879","v_CA16_3888","v_CA16_3954","v_CA16_3999","v_CA16_4840","v_CA16_4843","v_CA16_4849","v_CA16_4862","v_CA16_4870","v_CA16_4836","v_CA16_4856","v_CA16_4859","v_CA16_4873","v_CA16_4877","v_CA16_4886","v_CA16_4888","v_CA16_4890","v_CA16_4897","v_CA16_5051","v_CA16_5060","v_CA16_5063","v_CA16_5078","v_CA16_5096","v_CA16_5105","v_CA16_5108","v_CA16_5123","v_CA16_5141","v_CA16_5147","v_CA16_5153","v_CA16_5162","v_CA16_5189","v_CA16_5213","v_CA16_5225","v_CA16_5243","v_CA16_5258","v_CA16_5282","v_CA16_5291","v_CA16_5303","v_CA16_5321","v_CA16_5327","v_CA16_5333","v_CA16_5339","v_CA16_5348","v_CA16_5375","v_CA16_5399","v_CA16_5411","v_CA16_5429","v_CA16_5444","v_CA16_5468","v_CA16_5477","v_CA16_5489","v_CA16_5507","v_CA16_5513","v_CA16_5519","v_CA16_5522","v_CA16_5531","v_CA16_5555","v_CA16_5561","v_CA16_5564","v_CA16_5573","v_CA16_5597","v_CA16_5600","v_CA16_5621","v_CA16_5627","v_CA16_5639","v_CA16_5645","v_CA16_5654","v_CA16_5660","v_CA16_5693","v_CA16_5699","v_CA16_5762","v_CA16_5867","v_CA16_5870","v_CA16_6119","v_CA16_6659","v_CA16_5777","v_CA16_5792","v_CA16_5813","v_CA16_5831","v_CA16_6692","v_CA16_6698","v_CA16_6704","v_CA16_6707","v_CA16_6719","v_CA16_6725","v_CA16_6731","v_CA16_6734")
+
+# pull from the census.  Use geo_format='sf' to also obtain the census boundary polygons
+census_data_all <-  get_census(dataset='CA16', regions=regions, vectors=vectors_all, labels="detailed", geo_format='sf', level='CSD')
+
+```
+
+```{r renamingvariables, cache = TRUE}
+# rename variables to get rid of non-alphanumeric characters
+names(census_data_ind) <- str_replace_all(names(census_data_ind), pattern="v_CA\\d+_\\d+:\\s", replacement = "X")
+census_data_ind = census_data_ind %>% rename_all(make.names)
+census_data_ind %>% glimpse
+```
+
+
+Adjust some industries so they match GDP and THW datasets
+```{r}
+census_data_ind = census_data_ind %>% 
+  mutate(X11.Agriculture.forestry.fishing.hunting.21.Mining.quarrying.and.oil.and.gas.extraction = X11.Agriculture..forestry..fishing.and.hunting + X21.Mining..quarrying..and.oil.and.gas.extraction) %>%
+  mutate(X41.Wholesale.trade.44.45.Retail.trade                                                  = X41.Wholesale.trade+ X44.45.Retail.trade) %>%
+  mutate(X52.Finance.and.insurance.53.Real.estate.and.rental.and.leasing                         = X52.Finance.and.insurance + X53.Real.estate.and.rental.and.leasing) %>%
+  mutate(X55.Business.building.and.other.support.services.56                                     = X55.Management.of.companies.and.enterprises + X56.Administrative.and.support..waste.management.and.remediation.services) %>%
+  mutate(X51.Information.culture.and.recreation.71                                               = X51.Information.and.cultural.industries + X71.Arts..entertainment.and.recreation)
+
+
+```
+
+
+There are a few options for making plots.  See also [here](https://mountainmath.github.io/cancensus/articles/Making_maps_with_cancensus.html) for interactive maps via **leaflet**.
+```{R makeplots}
+#base R plots:
+plot(census_data_ind["X41.Wholesale.trade.44.45.Retail.trade"], main = "LFS counts of individuals: PEI wholesale and retail trade")
+
+
+# ggplot maps:
+census_data_ind %>% ggplot() +
+  geom_sf(aes(fill = X41.Wholesale.trade.44.45.Retail.trade))
+
+```
+
+
+
+```{r savingoutput}
+
+# construct a file name that is both descriptive and based on the name of the file used to construct and manipulate the data.
+census_data_ind  %>% write_csv(file = paste0(location,'1.a-Census2016-data/1.a_census_data_',Province,'.csv'))
+census_data_ind  %>% write_rds(file = paste0(location,'1.a-Census2016-data/1.a_census_data_',Province,'.rds'))
+province_codings %>% write_csv(file = paste0(location,'1.a_province_codings.csv'))
+
+```
+
+
+# As a script and download provincial Dissemination Areas
+
+Convert this markdown into a script by running the below line.  Loop over provinces and select **Dissemination Areas** rather than **Census Subdivisions**.  For clarity this is pasted below.
+```{r, eval = FALSE}
+knitr::purl("1.a-Census2016-download.Rmd")
+```
+
+### Loop over provinces and extract Dissemination Areas.
+
+```{r, message = FALSE, eval = TRUE}
+#Loop over all provinces:
+for(Province in province_codings$abv){
+  
+  prov_code = province_codings %>% filter(abv == Province) %>% select(code)
+  regions=list(PR=prov_code)
+  
+  # pull from the census.  Use geo_format='sf' to also obtain the census boundary polygons and level = 'CSD' to extract the regions
+  census_data_ind <- get_census(dataset='CA16', regions=regions, vectors=vectors_ind, labels="detailed", geo_format='sf', level='DA')
+  
+  # rename variables to get rid of non-alphanumeric characters
+  names(census_data_ind) <- str_replace_all(names(census_data_ind), pattern="v_CA\\d+_\\d+:\\s", replacement = "X")
+  census_data_ind = census_data_ind %>% rename_all(make.names)
+  
+  census_data_ind = census_data_ind %>% 
+    mutate(X11.Agriculture.forestry.fishing.hunting.21.Mining.quarrying.and.oil.and.gas.extraction = X11.Agriculture..forestry..fishing.and.hunting + X21.Mining..quarrying..and.oil.and.gas.extraction) %>%
+    mutate(X41.Wholesale.trade.44.45.Retail.trade                                                  = X41.Wholesale.trade+ X44.45.Retail.trade) %>%
+    mutate(X52.Finance.and.insurance.53.Real.estate.and.rental.and.leasing                         = X52.Finance.and.insurance + X53.Real.estate.and.rental.and.leasing) %>%
+    mutate(X55.Business.building.and.other.support.services.56                                     = X55.Management.of.companies.and.enterprises + X56.Administrative.and.support..waste.management.and.remediation.services) %>%
+    mutate(X51.Information.culture.and.recreation.71                                               = X51.Information.and.cultural.industries + X71.Arts..entertainment.and.recreation) %>%
+    mutate(PR_UID = province_codings %>% filter(abv == Province)%>% pull(code)) # add in province code so that DA and CSD match.
+  
+  # construct a file name that is both descriptive and based on the name of the file used to construct and manipulate the data.
+  census_data_ind  %>% write_csv(file = paste0(location,'1.a-Census2016-data/1.a_census_data_',Province,'_DA.csv'))
+  census_data_ind  %>% write_rds(file = paste0(location,'1.a-Census2016-data/1.a_census_data_',Province,'_DA.rds'))
+  
+}
+
+```

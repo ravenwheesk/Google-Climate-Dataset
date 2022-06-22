@@ -1,0 +1,304 @@
+---
+title: "Obtain and clean up the LFS data"
+author: "Dave Campbell"
+date: "08/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+
+
+# Goal:
+Acquire the Labour Force Survey microdata.  Format and rename variables.  Loop over all months of 2021.  Previous years seem to be available but must be ordered  StatCan.
+
+### Note: Not Used Elsewhere
+
+
+
+## Software Version
+
+
+```{r Rversion}
+#using R:
+version
+```
+
+## Import libraries
+
+
+```{r library, warning = FALSE, message = FALSE}
+#using R:
+library(tidyverse)  # data manipulation and piping
+library(data.table) # renaming columns in bulk using 'setnames'
+library(plyr)       # recoding factor levels using 'mapvalues'  
+library(glue)       # used for dynamic variable recoding
+
+# set up data location:
+location = "R:/res/wher/Google_Climate_Dataset/"
+```
+
+
+
+
+
+## Data Documentation and Direct Data Download.
+
+
+Here we use the monthly *Labour Force Survey Public Use Microfile* from [StatCan](https://www150.statcan.gc.ca/n1/pub/71m0001x/71m0001x2021001-eng.htm). This file directly downloads a zip file from Statistics Canada containing both the metadata and csv datafile.
+
+
+Downloading LFS directly from StatCan.  
+
+
+
+```{r, cache = TRUE,  message = FALSE, warning=FALSE}
+
+# make a temp file
+lfs_data = NULL
+
+year  = "2021"
+for(month in c("01","02","03","04","05","06","07","08","09","10","11","12")){
+  temp <- tempfile()
+  # note the change in formatting of the url is handled here:
+  if(month %in% c("01","02","03","04")){
+    month2use = paste0(month, "-CSV-eng")
+  }else{
+    month2use = paste0(month, "-CSV")
+  }
+  #construct the url 
+  url = paste0("https://www150.statcan.gc.ca/n1/en/pub/71m0001x/2021001/",year,"-",month2use,".zip")
+  download.file(url,temp) # download the file from the url into the temp file
+  (file_list <- as.character(unzip(temp, list = TRUE)$Name)) #list = TRUE <-- list the files but do not exract them
+  # extract the metadata
+  lfs_meta_data <- read_csv(unz(temp, file_list[1]),skip = 1, col_names = FALSE) 
+  # Here I skip the first line since it contains '\' which is read as an invalid character. 
+  # Since I've skipped the column names in the csv I tell it not to make column names
+  tmp_data      <- read_csv(unz(temp, file_list[3])) %>%
+    rename_all(make.names)%>% # rebuild names so that column names no longer include spaces and non-alphanumeric characters
+    mutate(year = year, month = month) 
+  unlink(temp) # delete the temp file
+  lfs_data = rbind(lfs_data,tmp_data)
+}
+
+# # showing the data files
+# # meta data file:
+# lfs_meta_data %>% head
+# # datafile is painfully unreadable:
+# lfs_data %>% glimpse()
+
+
+```
+
+## Making more descriptive variable names from metadata.
+Recode CMA and Province names into R friendly values.  This improves readibility, prevents errors in filtering, and simplifies merging with other data sets later on.
+
+**Assuming** that LFS metadata didn't change substantially...
+
+```{r renamingvariables, cache = TRUE}
+
+# recode province and CMA by extracting coding from the metadata by first finding where in the metadata file the codings are kept:
+province_index = which(str_detect(lfs_meta_data$X5, pattern = "prov"))
+cma_index      = which(str_detect(lfs_meta_data$X5, pattern = "cma"))
+
+province_codings = tibble(old_names = as.numeric(lfs_meta_data$X12[province_index+c(1:10)]),
+                         new_names = lfs_meta_data$X13[province_index+c(1:10)])
+
+cma_codings      = tibble(old_names = as.numeric(lfs_meta_data$X12[cma_index+c(1:10)]),
+                         new_names = lfs_meta_data$X13[cma_index+c(1:10)])
+
+# We can also clean up the poor encoding of accent letters or deal with spaces
+
+cma_codings = cma_codings %>% mutate(new_names = iconv(cma_codings$new_names, to='UTF-8'))%>% # get rid of poor encoding
+                              mutate(new_names = str_replace_all(new_names, pattern = "\xe9"                  , replacement = "e"))%>% # swap "é" with "e" in case this causes problems for my English keyboard later.
+                              mutate(new_names = str_replace_all(new_names, pattern = "\\s|[[:punct:]]|(\x96)", replacement = "_")) # spaces, punctuation or badly encoded slashes.
+province_codings = province_codings %>% 
+                             mutate(new_names = str_replace_all(new_names, pattern = "\\s",                     replacement = "_"))
+
+# resulting province and cma names:
+province_codings
+cma_codings
+
+
+# Recoding provinces and cmas:
+lfs_data = lfs_data %>%
+  mutate(PROV = plyr::mapvalues(PROV, from = province_codings$old_names, to = province_codings$new_names))%>%
+  mutate(CMA  = plyr::mapvalues(CMA,  from = cma_codings$old_names,      to = cma_codings$new_names))
+
+# build a mapping from old names to the more descriptive names:
+new_variable_name_recodings = lfs_meta_data %>% 
+  mutate(old_name = toupper(X5), new_name = str_replace_all(toupper(X6), pattern = "\\s+|[:punct:]+",replacement = "_"))%>%
+  mutate(new_name =                         str_replace_all(new_name,    pattern = "_{2,}",          replacement = "_"))%>%
+  select(old_name, new_name)%>% 
+  drop_na()
+# This makes most variable names easier to read, but 
+# a few new_variable names are not unique.  
+# Option 1: just alter the duplicate variable names
+# Option 2: combine all the old and new names.  <-- This is probably more robust and consistent although it makes for longer names
+#          # A user could then search for the original or altered variable names easily
+
+
+# # Option 1: just alter the duplicate variable names
+# 
+# duplicatenames = names(which(table(new_variable_name_recodings$new_name)>1))
+# 
+# 
+# for(duplicate in duplicatenames){
+# index = which(new_variable_name_recodings$new_name ==duplicate)
+#   new_variable_name_recodings$new_name[index]  = 
+#     paste(new_variable_name_recodings$old_name[index], 
+#           new_variable_name_recodings$new_name[index], sep=".")
+#     
+# }
+
+# Option 2: combine all the old and new names.  <-- This is probably more future proof 
+#
+new_variable_name_recodings = new_variable_name_recodings %>%
+                        mutate(new_name = paste(old_name, new_name, sep="."))
+
+
+
+
+# change the variable names to (longer) more descriptive names
+setnames( lfs_data,
+old = new_variable_name_recodings$old_name, 
+new = new_variable_name_recodings$new_name, skip_absent = TRUE)
+
+
+
+
+```
+
+
+## General Variable Recoding From MetaData
+
+Recode all the variables dynamically by extracting the recodings from the metadata.  This also re-scales numeric variables which have one or two implied decimal places.
+
+
+```{r recode_variables_dynamically, warning = FALSE, message = FALSE}
+# set up a new data frame:
+lfs_data_recode = lfs_data
+
+
+#Loop over variable names
+# recode factors using the metadata
+# rescale cases where the variable is numeric and has 1 or 2 implied decimals
+
+# cycle through almost all of the variables except these ones:
+colnames2use = setdiff(colnames(lfs_data_recode), 
+                        c("REC_NUM.ORDER_OF_RECORD_IN_FILE","SURVYEAR.SURVEY_YEAR","SURVMNTH.SURVEY_MONTH","PROV.PROVINCE","CMA.NINE_LARGEST_CMAS", "FINALWT.STANDARD_FINAL_WEIGHT", "year","month"))
+
+for(variable_from_lfs_data in colnames2use){
+
+
+  ## find the relevant rows of the metadata relating to this variable
+  metadata_all_vars_index = which(!is.na(lfs_meta_data$X5)) # starting point for all variables
+  metadata_index_start = which(str_detect(
+        tolower(lfs_meta_data$X5), 
+        pattern = tolower(unlist(strsplit(variable_from_lfs_data,split="\\."))[1])
+    ))# starting point for our variable
+  metadata_index_end = metadata_all_vars_index[metadata_all_vars_index>metadata_index_start][1] #starting point for the subsequent variable
+
+  # extract the lfs_data coded variable and its meaning
+  data_codings = tibble(old_names = lfs_meta_data$X12[metadata_index_start:metadata_index_end],
+                        new_names = lfs_meta_data$X13[metadata_index_start:metadata_index_end])%>%
+                 drop_na()
+  # We can also clean up the poor encoding of accent letters or deal with spaces
+
+  data_codings = data_codings %>% mutate(new_names = iconv(data_codings$new_names, to='UTF-8'))%>% #  poor encoding
+                              mutate(new_names = str_replace_all(new_names, 
+                                                                 pattern = "\xe9",                   replacement = "e"))%>% # swap "é" with "e" 
+                              mutate(new_names = str_replace_all(new_names, 
+                                                                 pattern = "\\s|[[:punct:]]|(\x96)", replacement = "_")) # spaces, punctuation or badly encoded slashes.
+
+  
+    # recode the categorical variables, some variables are numeric.  These won't be recoded here, see "else"
+    if(nrow(data_codings)>1 & 
+        data_codings[1,1]!="1-990" &  # hours per week worked is not recoded in this way 
+        data_codings[1,1]!="0-990" &  # hours away from work is not recoded in this way
+        data_codings[1,1]!="1-999999" # money earned is not recoded in this way
+      ){
+      
+    # Recoding variables:
+    # Using glue we can dynamically create the line of code to recode the variable.
+    # eval(parse(text=... treats the 'glue' code as text that is to be evaluated.
+    # note that values within {} are evaluated so that they are placed into the code to excecute
+    # The way this is coded I could have just used 'paste' to do this.  
+
+    eval(parse(text= glue("lfs_data_recode = lfs_data_recode %>% mutate({variable_from_lfs_data} = mapvalues({variable_from_lfs_data}, from = data_codings$old_names, to = data_codings$new_names))")))
+    }else{ # handling variables with one or two decimals:
+     # handling 1 decimal place recodings:
+      if(nrow(data_codings)>1 & any(str_detect(data_codings$new_names, pattern = "implied_decimal"))){ 
+        # Recoding variables:
+        # Using glue we can dynamically create the line of code to recode the variable.
+        # eval(parse(text=... treats the 'glue' code as text that is to be evaluated.
+        # note that values within {} are evaluated so that they are placed into the code to excecute
+        # The way this is coded I could have just used 'paste' to do this.  
+
+        eval(parse(text= glue("lfs_data_recode = lfs_data_recode %>% mutate({variable_from_lfs_data} = as.numeric({variable_from_lfs_data})/10)")))
+        }else{
+        # handling 2 decimal place recodings:
+          if(nrow(data_codings)>1 & any(str_detect(data_codings$new_names, pattern = "two_decimals"))){ 
+          # Recoding variables:
+          # Using glue we can dynamically create the line of code to recode the variable.
+          # eval(parse(text=... treats the 'glue' code as text that is to be evaluated.
+          # note that values within {} are evaluated so that they are placed into the code to excecute
+          # The way this is coded I could have just used 'paste' to do this.  
+  
+          eval(parse(text= glue("lfs_data_recode = lfs_data_recode %>% mutate({variable_from_lfs_data} = as.numeric({variable_from_lfs_data})/100)")))
+          }
+        }
+    }
+}
+
+
+```
+
+### Comparing files
+
+```{r}
+#original with renamed variables
+lfs_data
+#with renamed variables and recoded values
+lfs_data_recode
+
+```
+
+
+
+
+### Saving output
+Construct a descriptive name using the year = `r print(year)` as defined above.  Save both versions of the LFS with and without recoded variables.  
+
+**Come back later and obtain more LFS data?**
+
+```{r savingoutput}
+
+# construct a file name that is both descriptive and based on the name of the file used to construct and manipulate the data.
+write_csv(lfs_data, file = paste0(location,"1.b-lfs-data-from-",year,".csv"))
+write_csv(lfs_data_recode, file = paste0(location,"1.b-lfs_data_recoded_vars-from-",year,".csv"))
+
+
+```
+
+### Saving Just PEI
+Both versions of the dataset.
+```{r pei, eval = TRUE}
+
+# construct a file name that is both descriptive and based on the name of the file used to construct and manipulate the data.
+province_selected = "Prince_Edward_Island"
+lfs_data %>% filter(PROV.PROVINCE == province_selected) %>%
+                    write_csv( file = paste0(location,"1.b-lfs-",province_selected,"-",year,".csv"))
+
+
+
+lfs_data_recode %>% filter(PROV.PROVINCE == province_selected) %>%
+                    write_csv( file = paste0(location,"1.b-lfs_recoded_vars-",province_selected,"-",year,".csv"))
+
+
+
+```
+

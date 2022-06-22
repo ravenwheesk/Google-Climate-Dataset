@@ -1,0 +1,251 @@
+---
+title: "4.b- Productivity per NAICS within Province"
+author: "Sandrine Njoo & Dave Campbell"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Goal
+Obtain the productivity adjusted GDP per NAICS per census subdivision for a given time point.  Using the 2016 census, subdivide the monthly productivity (from **3e**) into shares based on residence within a Census Subdivision or Dissemination Area.
+
+
+# Set up the work environment
+
+```{r}
+version
+```
+
+load libraries
+```{r library, warning = FALSE, message = FALSE}
+#using R:
+library(tidyverse)  # data manipulation and piping
+library(data.table) # renaming columns in bulk using 'setnames'
+library(plyr)       # recoding factor levels using 'mapvalues'  
+library(sf)         # to handle census subdivision polygons
+library(stringr)    # look for spcific provinces and csv files 
+library(glue)       # dynamic variable names
+library(ggpubr)     # plotting layouts
+library(lubridate)  # working with dates
+
+# set up data location:
+location = "R:/mfa/data_sci_div/Google Climate Project/"
+```
+
+
+
+## Data loading
+
+Load and examine the data that will be used.  Note the differences in time range and geographies.  Information from Territories is not available.
+
+
+```{r, message = FALSE, warning = FALSE, eval = TRUE}
+# Provincial encodings:
+province_codings = read_csv(file = paste0(location, '1.a_province_codings.csv'))
+
+
+# dictionary for converting NAICS code names across data types:
+full_dict_new <- read_csv( file = paste0(location, "2.c_full_dict_mapping_THW_GDP_LFS_Census.csv")) %>% select(GDP_ind_names,census,THW_ind_names,colours2use)%>% unique()
+# variable names:
+naics_gdp_vars    <- full_dict_new %>% pull(GDP_ind_names) 
+naics_census_vars <- full_dict_new %>% pull(census)        
+naics_thw_vars    <- full_dict_new %>% pull(THW_ind_names) 
+
+
+# Fraction of the provincial totals of a NAICS sector within a CSD and geometries:
+census_fraction_of_NAICS_in_csd_production = 
+                readRDS(paste0(location, "4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_NAIC_in_csd_Canada.rds"))
+
+# productivity per province
+productivity_adjusted_GDP_post2007 = read_csv(paste0(location, "3.e_productivity_adjusted_GDP_post2007.csv"))
+
+
+```
+
+
+# Subdivide the province into CSD based on the census
+
+
+The resulting data frames are very large; all census subdivisions are represented in each month.  These could be filtered and saved as individual files depending on where it is being used.
+
+```{r , eval = FALSE}
+# Consider all dates.  Alternatively uncomment:
+# month = "06"
+# year = "2015"
+# and include filter commands such as: 
+# filter(Date ==paste(year,month,"01",sep="-")) 
+
+
+# Merge the productivity per {naics, month, provice} with the census fraction of province in CSD.
+census_and_prod =  census_fraction_of_NAICS_in_csd_production %>%
+  # filter(Date ==paste(year,month,"01",sep="-")) %>% # if filtering by date
+  inner_join(productivity_adjusted_GDP_post2007, by = c("provincename" = "GEO"))
+
+# census_and_prod is structured now with:
+# variables starting with "adjusted_"   are the GDP per province, one value per province
+# variables starting with "X"           are the census csd fraction of that NAICS industry per province
+# variables starting with "production_in_csd" are the production per NAICS split into census csd allocation
+
+
+# provincial share of production multiplied by the fraction of province in the CSD
+eval(parse(text=
+             glue(paste0("census_and_prod = census_and_prod %>%", 
+                         "group_by(provincename, Date) %>%",
+                         "mutate( production_in_csd_",'{full_dict_new$census}'," = ",
+                         "adjusted_",'{full_dict_new$GDP_ind_names}',"*frac_in_csd_{full_dict_new$census}) %>%",
+                         "ungroup()"))
+))
+
+
+
+
+
+# extract just the columns for productivity within {NAICS, csd, year, month} 
+productivity_per_CSD = census_and_prod %>% select(Date,provincename,starts_with("production_in_csd"),Region.Name, Population, geometry)
+
+## Dominantn NAICS based on productivity per month/year.
+max_index = max.col(st_set_geometry(productivity_per_CSD%>% select(starts_with("production_in_csd_")), NULL))
+
+productivity_per_CSD = productivity_per_CSD %>%
+  mutate(Dominant_NAICS = full_dict_new$census[max_index])%>%
+  mutate(colourval = plyr::mapvalues(Dominant_NAICS, 
+                                     from = full_dict_new$census, 
+                                     to   = full_dict_new$colours2use))
+productivity_per_CSD   %>% write_rds(paste0(location, "4.b.ShinyApp.productivity/4.b_production_in_csd.rds"))
+
+# save provincial versions of this file so that it is easier to load:
+for(prov in productivity_per_CSD%>% pull(provincename) %>% unique){
+  productivity_per_CSD   %>% 
+    filter(provincename == prov)%>% 
+    write_rds(paste0(location, "4.b.ShinyApp.productivity/4.b_production_in_csd_in",prov,".rds"))
+}
+
+
+# subset a test case:
+year = "2020"
+month = "09"
+productivity_per_CSD   %>% 
+      filter(Date == paste(year,month,"01",sep="-"))%>% 
+  write_rds(paste0(location, "4.b.ShinyApp.productivity/4.b_production_in_csd-",year,"-",month,".rds"))
+
+
+
+
+# take the productivity per province and add back in the national value
+productivity_adjusted_GDP_post2007 = rbind(
+                                           productivity_adjusted_GDP_post2007,
+                                           productivity_adjusted_GDP_post2007 %>% 
+                                               group_by(Date) %>% 
+                                               dplyr::summarise(across(starts_with("adjusted"), sum)) %>% 
+                                               ungroup() %>% 
+                                               mutate (GEO = "Canada")
+)
+
+```
+
+
+# Total productivity including national:
+
+```{r, eval = FALSE} 
+productivity_adjusted_GDP_post2007 %>% write_rds(paste0(location, "4.b.ShinyApp.productivity/4.b_production_per_province_updated3.ewithCanada.rds"))
+
+
+```
+
+
+
+
+
+
+
+
+
+# Repeat for Dissemination Areas
+
+
+
+Again, the resulting data frames are very large; all census subdivisions are represented in each month.  These could be filtered and saved as individual files depending on where it is being used.
+
+```{r, eval = FALSE}
+# Consider all dates.  Alternatively uncomment the month and date info from above:
+# month = "06"
+# year = "2015"
+# and include filter commands such as: 
+# filter(Date ==paste(year,month,"01",sep="-")) 
+
+
+# Fraction of the provincial totals of a NAICS sector within a DA and geometries:
+census_fraction_of_NAICS_in_DA_production = 
+                readRDS(paste0(location, "4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_NAIC_in_DA_Canada.rds"))
+
+# productivity per province
+productivity_adjusted_GDP_post2007 = read_csv(paste0(location, "3.e_productivity_adjusted_GDP_post2007.csv"))
+
+
+
+
+
+
+# Merge the productivity per {naics, month, provice} with the census fraction of province in DA.
+census_and_prod =  census_fraction_of_NAICS_in_DA_production %>%
+  # filter(Date ==paste(year,month,"01",sep="-")) %>% # if filtering by date
+  inner_join(productivity_adjusted_GDP_post2007, by = c("provincename" = "GEO"))
+
+# census_and_prod is structured now with:
+# variables starting with "adjusted_"   are the GDP per province, one value per province
+# variables starting with "X"           are the census DA fraction of that NAICS industry per province
+# variables starting with "production_in_DA" are the production per NAICS split into census DA allocation
+
+
+# provincial share of production multiplied by the fraction of province in the DA
+eval(parse(text=
+             glue(paste0("census_and_prod = census_and_prod %>%", 
+                         "group_by(provincename, Date) %>%",
+                         "mutate( production_in_DA_",'{full_dict_new$census}'," = ",
+                         "adjusted_",'{full_dict_new$GDP_ind_names}',"*frac_in_DA_{full_dict_new$census}) %>%",
+                         "ungroup()"))
+))
+
+
+
+
+
+# extract just the columns for productivity within {NAICS, DA, year, month} 
+productivity_per_DA = census_and_prod %>% select(Date,provincename,starts_with("production_in_DA"),Region.Name, Population, geometry)
+
+## Dominantn NAICS based on productivity per month/year.
+max_index = max.col(st_set_geometry(productivity_per_DA%>% select(starts_with("production_in_DA_")), NULL))
+
+productivity_per_DA = productivity_per_DA %>%
+  mutate(Dominant_NAICS = full_dict_new$census[max_index])%>%
+  mutate(colourval = plyr::mapvalues(Dominant_NAICS, 
+                                     from = full_dict_new$census, 
+                                     to   = full_dict_new$colours2use))
+productivity_per_DA   %>% write_rds(paste0(location, "4.b.ShinyApp.productivity/4.b_production_in_DA.rds"))
+
+# save provincial versions of this file so that it is easier to load:
+for(prov in productivity_per_DA%>% pull(provincename) %>% unique){
+  productivity_per_DA   %>% 
+    filter(provincename == prov)%>% 
+    write_rds(paste0(location, "4.b.ShinyApp.productivity/4.b_production_in_DA_in",prov,".rds"))
+}
+
+
+# subset a test case:
+year = "2020"
+month = "09"
+productivity_per_DA   %>% 
+      filter(Date == paste(year,month,"01",sep="-"))%>% 
+  write_rds(paste0(location, "4.b.ShinyApp.productivity/4.b_production_in_DA-",year,"-",month,".rds"))
+
+
+
+```
+
+
+
+## Next
+Consider splitting the **productivity_per_CSD** and **productivity_per_DA** into pieces for year and month.
+

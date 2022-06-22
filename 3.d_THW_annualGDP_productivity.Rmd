@@ -1,0 +1,235 @@
+---
+title: "3.d Converting THW and Annual GDP into Productivity"
+author: "Sandrine Njoo & Dave Campbell"
+date: "09/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Goal
+Use the total hours worked within a sector and province to determine the amount of effort.  Obtain the productivity per sector , province, month by taking the GDP and slicing it based on effort.
+
+
+# Set up the work environment
+
+```{r}
+version
+```
+
+Libraries
+```{R, message = FALSE, warning = FALSE}
+library(tidyverse) # for its nice flow.
+library(cansim) #for pulling Stat Can socioeconomic data
+library(lubridate) # for dealing with dates
+library(GGally) # for pairs plot
+library(ggpubr) # for putting a regression equation onto a ggplot figure
+library(glue)   # used for dynamic variable construction
+library(stringr)
+
+# set up data location:
+location = "R:/res/wher/Google_Climate_Dataset/"
+```
+
+Load the data that will be used
+```{r, message = FALSE, warning = FALSE}
+
+full_dict_new <- read_csv(paste0(location, "2.c_full_dict_mapping_THW_GDP_LFS_Census.csv"))
+THW_post2007 <- read_csv(paste0(location, "1.c-Data_From_Cansim-total_hours_worked.csv"))
+GDP_Totals_annual_provincial_by_NAICS <- read_csv(paste0(location,'3.c-GDP_Totals_annual_provincial_by_NAICS.csv'))
+```
+
+
+
+
+Extract the columns we want from the GDP and THW dataframes.  Make sure that _year_ is included
+```{r}
+# This code is also used in 3.c to get the provincial share 
+
+naics_thw_vars = unique(full_dict_new$THW_ind_names)
+naics_gdp_vars = unique(full_dict_new$GDP_ind_names)
+
+# Just the raw GDP per {sector, year, province}
+new_gdp_total_post2007 = GDP_Totals_annual_provincial_by_NAICS %>%
+  select(GEO, Date, all_of(naics_gdp_vars))%>% 
+         mutate(year = year(Date))
+
+#Total hours worked per {month, year, sector, province}
+new_THW_post2007 = THW_post2007 %>%
+    select(GEO, Date, year,all_of(naics_thw_vars))
+
+
+```
+
+Replace NA values.  Deal with missing values in the  Agriculutre and utilities columns by subtracting the Canadian total from the sum of the values within other provinces for a given date.  In all cases there is at most one missing value per row.
+
+
+```{r}
+new_THW_post2007 <- new_THW_post2007 %>% 
+  group_by(Date) %>% 
+  mutate(Agriculture..forestry..fishing.and.hunting..11.mining.21 = 
+           ifelse (is.na(Agriculture..forestry..fishing.and.hunting..11.mining.21),          
+                   abs(-2*max(Agriculture..forestry..fishing.and.hunting..11.mining.21,na.rm=TRUE)+sum(Agriculture..forestry..fishing.and.hunting..11.mining.21, na.rm=TRUE)),
+                   Agriculture..forestry..fishing.and.hunting..11.mining.21 )) %>%
+  mutate(Utilities..22. = 
+           ifelse (is.na(Utilities..22.), 
+                   abs(-2*max(Utilities..22.,na.rm=TRUE)+sum(Utilities..22.,na.rm=TRUE)),
+                   Utilities..22. ))%>%
+  ungroup()
+
+```
+
+
+# Obtain Provincial Monthly Productivity by sector
+
+
+Sum total hours across all industries for a {province, month, year}.
+```{r}
+new_THW_post2007 = new_THW_post2007 %>% 
+  group_by(GEO,Date,year)%>%
+  mutate(totals.hours.ours = sum(c_across(naics_thw_vars))) %>% 
+  ungroup
+
+```
+
+
+Obtain the average hours worked for the year per province per sector.
+Data is annualized so each month is an estimate for the year.  The average month is then the average estimate for the year.
+
+```{r}
+
+
+
+scale2 <- function(x, na.rm = FALSE) mean(x)
+new_averageTHW_post2007 = new_THW_post2007 %>% 
+  filter(GEO !="Canada") %>%
+  group_by(year, GEO) %>% 
+  mutate(across(all_of(naics_thw_vars),scale2))%>%# all our NAICS encoded variables end with numbers
+  ungroup()
+                          
+
+```
+
+### Define productivity
+Productivity is the yearly GDP for each province and sector divided by the annual estimated hours worked.
+
+
+
+```{r}
+productivity_annual_avg <- new_averageTHW_post2007 %>%
+  inner_join(new_gdp_total_post2007, by=c("year", "GEO"))
+
+# use glue to calculate productivity
+ eval(parse(text= glue("productivity_annual_avg = productivity_annual_avg %>% 
+mutate({paste('prod', {naics_thw_vars}, sep = '_')} = (as.numeric({paste0({naics_thw_vars},'.y')}) /(as.numeric({paste0({naics_thw_vars},'.x')})))*1000)")))
+
+
+
+```
+
+
+Remove unwanted columns
+```{r}
+productivity_annual_avg = productivity_annual_avg %>% 
+  mutate(Date = Date.x)%>% 
+  select(c(GEO, Date, year), starts_with('prod'), ends_with('ours'))
+```
+
+Note that this produces a constant average productivity value repeated across each month.  Use this later to split it into monthly portions of effort.
+```{r}
+productivity_annual_avg %>% glimpse
+```
+
+Get the proportion of hours worked for each province in each sector compared to the national number.
+```{r}
+# same as code from:
+# 3.b_GDP_THW_census_grouping.Rmd
+scale3 <- function(x){x/sum(x)}
+new_THW_post2007_ratio  = new_THW_post2007  %>% 
+                          filter(GEO !="Canada")
+new_THW_post2007_ratio  = new_THW_post2007_ratio %>% 
+                          group_by(Date) %>% 
+                          mutate(across(naics_thw_vars,scale3))%>%
+                          ungroup()
+
+```
+
+Multiply the proportion of hours worked within each province by the productivity for the appropriate province and sector 
+
+```{r}
+prod_by_prov <-  new_THW_post2007_ratio%>% inner_join(productivity_annual_avg, by = c("Date", "GEO"))
+
+for (var_name in naics_thw_vars){
+ eval(parse(text= glue("prod_by_prov = prod_by_prov %>% 
+mutate({paste('gdp_prod', {var_name}, sep = '_')} = (as.numeric({var_name}) *(as.numeric({paste0('prod_',{var_name})}))))")))
+}
+
+```
+
+Remove unwanted column for the production 
+```{r}
+prod_by_prov <- prod_by_prov %>% select(c(Date, GEO), starts_with('gdp_prod_'))
+```
+
+```{r}
+prod_by_prov %>% glimpse
+```
+
+# Obtain National Monthly Productivity by sector
+Obtain national production by sector
+```{r}
+prod_national <- prod_by_prov %>% 
+  group_by(Date) %>% 
+  dplyr::summarise(across(where(is.numeric), sum))%>% 
+  mutate(GEO = "Canada")
+
+```
+
+```{r}
+prod_national %>%
+  glimpse
+```
+
+
+# Save output
+
+```{r}
+
+productivity_annual_avg   %>% write_csv( paste0(location, "3.d_productivity_per_province.csv"))
+prod_national             %>% write_csv( paste0(location, "3.d_productivity_national.csv"))
+
+```
+
+
+```{r, eval = FALSE, echo = FALSE}
+
+#
+# productivity_annual_avg_old = read_csv( "3.d-productivity_per_province_deprecated.csv") 
+# test = productivity_annual_avg %>% inner_join(productivity_annual_avg_old, by = c("GEO","Date"))
+# # 
+#  lp=0
+# lp=lp+1
+# var2use = paste0('prod_',naics_thw_vars[lp])#
+# # var2use = 'totals.hours.ours'# this is the only different column
+# tmp = eval(parse(text = glue(paste0("cbind(test${var2use}",".x",",test${var2use}",".x-","test${var2use}",".y)"))))
+# summary(tmp)
+# 
+# 
+# 
+# 
+# 
+# prod_national_old           = read_csv('3.d-productivity_national_deprecated.csv')
+# test = prod_national %>% inner_join(prod_national_old, by = c("GEO","Date"))
+# lp=0
+# lp=lp+1
+# var2use = paste0('gdp_prod_',naics_thw_vars[lp])#
+# 
+# tmp = eval(parse(text = glue(paste0("cbind(test${var2use}",".x",",test${var2use}",".x-","test${var2use}",".y)"))))
+# summary(tmp)
+
+```
+
+
+
+

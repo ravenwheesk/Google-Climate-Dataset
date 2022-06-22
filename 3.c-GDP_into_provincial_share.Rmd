@@ -1,0 +1,219 @@
+---
+title: '3.c - GDP Into Provincial Share'
+author: "Dave Campbell"
+date: '2021-11-08'
+summary: 'GDP share'
+lastmod: '2021-11-01T16:34:12-04:00'
+---
+
+
+
+
+# Goals
+
+Using GDP at the {national, monthly, NAICS sector} determine **GDP** share at {provincial, monthly, NAICS sector}.  We want to be able to assess provinces with larger / smaller share of the NAICS sector.
+
+
+
+
+# Basic libraries and R version
+
+```{R, message = FALSE, warning = FALSE}
+library(tidyverse) # for its nice flow.
+library(cansim) #for pulling Stat Can socioeconomic data
+library(lubridate) # for dealing with dates
+library(GGally) # for pairs plot
+library(ggpubr) # for putting a regression equation onto a ggplot figure
+library(glue)   # used for dynamic variable construction
+
+# set up data location:
+location = "R:/res/wher/Google_Climate_Dataset/"
+```
+
+```{R version}
+version
+```
+
+  
+  
+## Loading the GDP tables
+
+```{r loading, message = FALSE, warning = FALSE}
+
+# # GDP monthly, national:
+GDP_post2007       = read_csv(file = paste0(location, "1.c-Data_From_Cansim-GDP.csv"))
+# # GDP annual, provincial:
+GDPAnnual_post2007 = read_csv(file = paste0(location, "1.c-Data_From_Cansim-GDPAnnual.csv"))
+full_dict_new <- read_csv(file = paste0(location, '2.c_full_dict_mapping_THW_GDP_LFS_Census.csv'))
+
+naics_gdp_vars <- full_dict_new %>% filter(naics !=  "N/A" )%>% pull(GDP_ind_names) %>% unique() 
+naics_thw_vars <- full_dict_new %>% filter(naics !=  "N/A" )%>% pull(THW_ind_names) %>% unique() 
+
+```
+
+
+
+# Time stamps
+
+Check the resolution of the two datasets:
+
+```{r}
+
+GDPAnnual_post2007 %>% select(Date)%>% table
+GDP_post2007 %>% select(Date)%>% table %>% head(14)
+
+```
+
+Years in the annual data set are time stamped as July 1 and applied for the full calendar year.
+
+
+
+# Obtain annual fraction of GDP for \{sector, province\}
+
+Using annual data obtain the fraction of GDP within a sector that is allocated to each province
+
+
+
+```{r, warnings = FALSE}
+
+GDP_annual_national_by_NAICS = GDP_post2007 %>% 
+  select(year,all_of(naics_gdp_vars)) %>%
+  group_by(year)%>%
+  summarize(across(everything(),sum))%>% ungroup()
+
+
+# want to convert GDP within a NAICS into GDP fraction per province
+
+GDP_Totals_annual_provincial_by_NAICS = 
+  eval(parse(text=
+     # obtain a column of NATIONAL totals within each NAICS group for each year:
+   glue(paste0(
+    'GDPAnnual_post2007 %>% 
+    group_by(Date)%>% # within a year
+    mutate(',paste(paste0("Total_All_Provinces.",naics_gdp_vars,"=sum(",naics_gdp_vars,")"),collapse=","),')'))
+))%>%
+  ungroup()
+```
+
+
+### confirm this acted as intended:
+
+These should be equal.
+```{r}
+GDP_Totals_annual_provincial_by_NAICS %>% 
+  filter(Date == "2007-07-01")%>% 
+  select(Agriculture..forestry..fishing.and.hunting..11.mining.21)%>% sum
+GDP_Totals_annual_provincial_by_NAICS %>% 
+  filter(Date == "2007-07-01")%>%
+  select(Total_All_Provinces.Agriculture..forestry..fishing.and.hunting..11.mining.21)%>% unique()
+```
+
+
+## Obtain the provincial fraction of {national, annual, GDP per sector}  
+
+
+```{r}
+# complete the fraction
+GDP_fraction_annual_provincial_by_NAIC =
+  eval(parse(text=
+  # obtain a column of PROVINCIAL FRACTIONS within each NAICS group for each year:
+glue(paste0(
+  ' GDP_Totals_annual_provincial_by_NAICS %>% mutate(',paste(paste0("Fraction_Annual_Provinces.",naics_gdp_vars,"=",naics_gdp_vars,"/","Total_All_Provinces.",naics_gdp_vars),collapse=","),')'))
+))
+```
+
+
+
+### confirm this acted as intended:
+
+These should be equal and within a date it should sum to 1.  Note that dates here are actually _year_ since they are all July 1st for a given year.
+```{R}
+GDP_Totals_annual_provincial_by_NAICS     %>% filter(Date == "2007-07-01")%>% select(                          Agriculture..forestry..fishing.and.hunting..11.mining.21)/
+   GDP_Totals_annual_provincial_by_NAICS  %>% filter(Date == "2007-07-01")%>% select(                          Agriculture..forestry..fishing.and.hunting..11.mining.21)%>% sum
+GDP_fraction_annual_provincial_by_NAIC    %>% filter(Date == "2007-07-01")%>% select(Fraction_Annual_Provinces.Agriculture..forestry..fishing.and.hunting..11.mining.21, GEO)
+GDP_fraction_annual_provincial_by_NAIC    %>% filter(Date == "2007-07-01")%>% select(Fraction_Annual_Provinces.Agriculture..forestry..fishing.and.hunting..11.mining.21)%>%sum #sums to 1
+
+```
+
+
+
+# Obtain the monthly GDP allocation for \{sector, province\}
+Using annual fraction of GDP per \{province, sector\} assume that GDP per sector maintains a constant fractional allocation per \{province, month\}.
+
+Calculate the monthly GDP per \{sector, province\} by taking the annual fraction of NAICS sector within a province and applying that fraction to monthly national GDP:
+
+
+
+```{r}
+# craft the building blocks:
+GDP_FRACTIONS_annual_provincial_by_NAIC = GDP_fraction_annual_provincial_by_NAIC%>% 
+   separate(Date, into = c("year","month","day")) %>% 
+  mutate(year = as.numeric(year))%>%
+   select(GEO, year, paste0("Fraction_Annual_Provinces.",naics_gdp_vars))
+
+
+GDP_monthly_national_by_NAICS = GDP_post2007 %>% select(Date, year, month, all_of(naics_gdp_vars))
+
+
+
+# join these together then multiply the fraction allocated to a province to the monthly GDP total
+ GDP_total_monthly_by_province_sector = eval(parse(text=
+     # obtain a column of NATIONAL totals within each NAICS group for each year:
+   glue(paste0(
+     'GDP_FRACTIONS_annual_provincial_by_NAIC %>% 
+     inner_join(GDP_monthly_national_by_NAICS) %>%
+     group_by(year)%>%
+     mutate(',paste(paste0("GDP_allocation_for_province.",naics_gdp_vars,"=Fraction_Annual_Provinces.",naics_gdp_vars,"*",naics_gdp_vars),collapse=","),')'))
+))%>%
+  ungroup()%>%
+   select(Date, GEO,starts_with('GDP_allocation_for_province')) # cleanup
+
+ 
+ 
+
+```
+
+
+# Try some plots
+
+```{r plots}
+
+
+GDP_total_monthly_by_province_sector %>% 
+  pivot_longer(cols = -c(Date, GEO), names_to= "sector", values_to="GDP")%>%
+  ggplot()+
+geom_line(aes(x=Date, y = GDP, colour = sector),lwd=2,alpha = .5)+
+  facet_wrap(~GEO)+ylim(0,110000)+
+  ggtitle("Monthly GDP per Province per Sector")
+
+
+
+GDP_FRACTIONS_annual_provincial_by_NAIC %>% 
+  select(year, GEO,starts_with('Fraction_Annual_Provinces.'))%>%
+  pivot_longer(cols = -c(year, GEO), names_to= "sector", values_to="GDP")%>%
+  ggplot()+
+  geom_line(aes(x=year, y = GDP, colour = GEO, group = GEO),lwd=2,alpha = .5)+
+  facet_wrap(~sector)+
+  ggtitle("Fraction Within Sector Allocated to Each Province")
+
+```
+
+
+
+# saving output
+```{r saving}
+# the GDP total for a province in a month in a sector:
+GDP_total_monthly_by_province_sector  %>% write_csv(file = paste0(location, "3.c-GDP_total_monthly_by_province_sector.csv"))
+GDP_Totals_annual_provincial_by_NAICS %>% write_csv(file = paste0(location, "3.c-GDP_Totals_annual_provincial_by_NAICS.csv"))
+
+
+# some interim results:
+save("GDP_FRACTIONS_annual_provincial_by_NAIC",
+    "GDP_annual_national_by_NAICS",
+    "GDP_monthly_national_by_NAICS",
+    "GDP_total_monthly_by_province_sector", file = paste0(location, "3.c-GDP_total_monthly_by_province_sector.Rdata"))
+
+```
+
+
+

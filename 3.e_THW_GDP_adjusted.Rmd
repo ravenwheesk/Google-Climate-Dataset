@@ -1,0 +1,144 @@
+---
+title: "3.e THW and GDP adjusted"
+author: "Sandrine Njoo & Dave Campbell"
+date: "15/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Goal
+Use productivity and split it into provincial share
+
+# Set up the work environment
+
+```{r}
+version
+```
+
+Libraries
+
+```{R, message = FALSE, warning = FALSE}
+library(tidyverse) # for its nice flow.
+library(lubridate) # for dealing with dates
+library(GGally) # for pairs plot
+library(ggpubr) # for putting a regression equation onto a ggplot figure
+library(glue)   # used for dynamic variable construction
+library(stringr)
+
+# set up data location:
+location = "R:/res/wher/Google_Climate_Dataset/"
+```
+## 
+
+# Data loading
+
+Load and examine the data that will be used.  Note the differences in time range and geographies.  Information from Territories is not available.
+
+```{r, message = FALSE, warning = FALSE}
+# unique values of GDP per {NAICS, month, province}
+THW_GDP_post2007 = read_csv(paste0(location, '3.b_GDP_contribution_per_NAICS_province_post2007.csv'))
+THW_GDP_post2007 %>% pull(Date)%>% range
+THW_GDP_post2007 %>% pull(GEO)%>% unique
+THW_GDP_post2007 %>% glimpse
+
+
+# average productivity per {NAICS, year, province} but the same annual value is repeated once per month to make merging and maths easier below
+productivity_annual_avg     = read_csv(paste0(location, "3.d_productivity_per_province.csv"))
+# productivity_annual_avg   = read_csv(paste0(location, "3.d-productivity_per_province_deprecated.csv"))
+productivity_annual_avg %>% pull(Date)%>% range
+productivity_annual_avg %>% pull(GEO)%>% unique
+productivity_annual_avg %>% glimpse
+
+
+# unique productivity per {NAICS, month, national} 
+prod_national   = read_csv(paste0(location, "3.d_productivity_national.csv"))
+# prod_national = read_csv(paste0(location, "3.d-productivity_national_deprecated.csv"))
+prod_national %>% pull(Date)%>% range
+prod_national %>% pull(GEO)%>% unique
+prod_national %>% glimpse
+
+
+# for mapping NAICS variables to colours
+full_dict_new <- read_csv(paste0(location, "2.c_full_dict_mapping_THW_GDP_LFS_Census.csv"))
+colmat = full_dict_new%>% select(GDP_ind_names,colours2use,census)%>% unique()
+
+```
+
+Load a helper dictionary with variable names
+```{r, message = FALSE, warning = FALSE}
+full_dict_new <- read_csv(paste0(location, "2.c_full_dict_mapping_THW_GDP_LFS_Census.csv"))
+naics_gdp_vars = unique(full_dict_new$GDP_ind_names)
+
+```
+
+
+
+
+
+# Calculate the adjusted GDP
+
+Obtain the fraction of productivity of a province compared to the national level.  The monthly fraction of productivity is the provincial value divided by the national value.
+
+
+```{r}
+
+# merge the two data sets to make multiplying easier at a fixed date
+# This ensures the all the dates align:
+Merged_gdp = prod_national %>%  inner_join(productivity_annual_avg, by = "Date")
+
+
+# use glue to match the NAICS variables
+# populate the NAICS variable columns:
+eval(parse(text =
+             glue(paste0("Merged_gdp = Merged_gdp %>% mutate(gdp_ratio_{naics_gdp_vars} = prod_{naics_gdp_vars}","/gdp_prod_{naics_gdp_vars})"))
+          )
+     )
+
+
+# define a place to keep the useful info:
+ratios = Merged_gdp%>% select(GEO.y, Date, starts_with("gdp_ratio_"))%>% # just keep the location and date
+  dplyr::rename("GEO" = "GEO.y")
+
+
+```
+```{r}
+ratios %>% glimpse
+```
+
+# Split productivity into the fraction of gdp within each province
+Multiply monthly fraction of productivity per province by the values in THW_GDP_post2007. Do this via a similar merging strategy to ensure GEO and Dates match.
+Generate the code automatically using **glue** so that all variables are appropriately constructed.  To reconstruct the generated lines of code used run the 2 lines for the **glue** command.
+
+```{r}
+productivity_adjusted_GDP_post2007 <- merge(THW_GDP_post2007, ratios, by = c('Date',"GEO"))
+
+eval(parse(text= 
+glue("productivity_adjusted_GDP_post2007 = productivity_adjusted_GDP_post2007 %>% 
+mutate({paste0('adjusted_', {naics_gdp_vars})} = (as.numeric({naics_gdp_vars}) * as.numeric({paste0('gdp_ratio_', {naics_gdp_vars})})))")
+))
+
+productivity_adjusted_GDP_post2007 <- productivity_adjusted_GDP_post2007%>% select(c('Date', 'GEO'), starts_with('adjusted_'))
+
+productivity_adjusted_GDP_post2007%>% glimpse
+```
+
+# Save the output 
+Also save a reshaped version of the output that will make plotting faster in the Shiny Apps.
+
+```{r, eval = TRUE}
+
+productivity_adjusted_GDP_post2007 %>% write_csv(paste0(location, "3.e_productivity_adjusted_GDP_post2007.csv"))
+
+productivity_adjusted_GDP_post2007 %>%
+  pivot_longer(starts_with("adjusted"), names_to="NAICS", values_to="productivity")%>%
+  mutate(colourval = plyr::mapvalues(NAICS, from = paste0("adjusted_",colmat$GDP_ind_names), to = colmat$colours2use))%>% 
+  write_csv(paste0(location, "3.e_productivity_adjusted_GDP_post2007_tall.csv"))
+
+
+```
+
+
+

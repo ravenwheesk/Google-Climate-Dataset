@@ -1,0 +1,94 @@
+---
+title: "3.a_grouping_LFS"
+author: "Sandrine Njoo"
+date: "28/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Consider the total number of hours worked by employment status, by industry from the labour force survey data.  Currently only uses one {province, month, year}.  
+__Currently this output is not used elsewhere so not yet saved.__
+
+## Creating a grouping for LFS data
+
+Loading libraries 
+```{r library, warning = FALSE, message = FALSE}
+library(tidyverse)  # data manipulation and piping
+library(data.table) # renaming columns in bulk using 'setnames'
+library(plyr)       # recoding factor levels using 'mapvalues'  
+library(dplyr)
+
+# set up data location:
+location = "R:/res/wher/Google_Climate_Dataset/"
+```
+
+## Reading the LFS data
+
+```{r  message=FALSE, warning = FALSE}
+province = "Prince_Edward_Island"
+year = "2021"
+month = "09"
+lfs <- read_csv(paste0(location, "1.b-lfs_recoded_vars-",province,"-",year,".csv"))
+
+```
+
+## Creating groupings for labour force status
+
+
+
+Creating two dataframes, the first one allows us to get an idea of the number of people in each industry and their labour force status (employed but absent fro work,employed and working, not in labour force or unemployed)
+The second one just gives the number of people per labour force status
+
+```{r}
+people_per_industry_employment <- lfs %>%
+  group_by(NAICS_21.INDUSTRY_OF_MAIN_JOB,LFSSTAT.LABOUR_FORCE_STATUS) %>%
+  tally() # keep this grouped by NAICS
+```
+
+## Creating a dataframe with the percentage of employment status per industry
+```{r}
+lfs_employment <- people_per_industry_employment %>%
+  dplyr::mutate(N_in_NAICS = sum(n), percent_NAICS = n/sum(n)*100)
+
+lfs_employment 
+```
+
+
+
+
+
+## Creating groupings for hours worked 
+
+
+```{r}
+hours_worked<- lfs %>% 
+  select(NAICS_21.INDUSTRY_OF_MAIN_JOB,
+         LFSSTAT.LABOUR_FORCE_STATUS,
+         UHRSMAIN.USUAL_HOURS_WORKED_PER_WEEK_AT_MAIN_JOB, 
+         AHRSMAIN.ACTUAL_HOURS_WORKED_PER_WEEK_AT_MAIN_JOB)
+```
+
+Add up the usual hours in one column and the actual hours worked per industry according to LFS status 
+```{r}
+hours_per_ind <- hours_worked %>%
+  group_by(NAICS_21.INDUSTRY_OF_MAIN_JOB, LFSSTAT.LABOUR_FORCE_STATUS) %>%
+  dplyr::summarise(hwi = sum(UHRSMAIN.USUAL_HOURS_WORKED_PER_WEEK_AT_MAIN_JOB),
+                   ahwi = sum(AHRSMAIN.ACTUAL_HOURS_WORKED_PER_WEEK_AT_MAIN_JOB)) %>%
+  ungroup()
+
+hours_per_ind %>% glimpse
+```
+Now,  look at total hours worked per industry compared with total hours worked in PEI
+
+```{r}
+fraction_of_employment_hours_per_industry <- hours_per_ind %>% 
+   group_by(LFSSTAT.LABOUR_FORCE_STATUS) %>%
+  dplyr::mutate( fraction_of_status_hwi = hwi/sum(hwi)) %>%
+  dplyr::mutate( fraction_of_status_ahwi = ahwi/sum(ahwi))
+
+fraction_of_employment_hours_per_industry %>% glimpse
+```
+

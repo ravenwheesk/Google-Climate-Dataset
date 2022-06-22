@@ -1,0 +1,711 @@
+---
+title: 'GDP and Total Hours Worked'
+author: "Dave Campbell"
+date: '2021-11-01'
+summary: 'Cansim data extraction'
+lastmod: '2022-09-06T16:34:12-04:00'
+---
+
+# Goals
+
+Extract **Total Hours Worked** in each NAICS sector at \{province, monthly, NAICS sector\} and **GDP** at both {provincial, annual, NAICS sector} and \{national, monthly, NAICS sector\}.  Ultimately want to use total hours worked to split the GDP per sector into shares for each province.
+
+# Limitations
+
+- **Management.of.companies.and.enterprises..55.** is missing before 2007.  May need imputing by growing it back by total GDP and/or considering growth of other variables.
+
+# Data Provider
+
+Statistics Canada hosts a large set of socio-economic [datasets](https://www150.statcan.gc.ca/n1//en/type/data?MM=1#tables). 
+
+
+# Basic libraries and R version
+
+```{R, message = FALSE, warning = FALSE}
+library(tidyverse) # for its nice flow.
+library(cansim) #for pulling Stat Can socioeconomic data
+library(lubridate) # for dealing with dates
+library(GGally) # for pairs plot
+library(ggpubr) # for putting a regression equation onto a ggplot figure
+library(glue)   # used for dynamic variable construction
+library(dplyr)  # for data manipulation
+
+# set up data location:
+location = "R:/res/wher/Google_Climate_Dataset/"
+```
+
+```{R version}
+version
+```
+
+  
+## Pulling the raw tables from the cansim library
+
+The **total hours wored** data table has 10 million rows and the **GDP** table has 1/4 milllion.  While we're at it, remake some column names to make them more R friendly and construct proper dates.
+
+
+```{R, message = FALSE, cache = TRUE, warning = FALSE, eval = FALSE}
+#Actual hours worked by industry, monthly, unadjusted for seasonality
+THW = get_cansim("14-10-0036-01") %>% rename_all(make.names) 
+
+#Actual hours worked by industry, monthly, adjusted for seasonality, national
+THWSA = get_cansim("14-10-0289-01") %>% rename_all(make.names) 
+
+#Employment by industry, monthly, unadjusted for seasonality
+EMP = get_cansim("14-10-0355-01") %>% rename_all(make.names) 
+
+#Gross domestic product (GDP) at basic prices, by industry, monthly (x 1,000,000)
+GDP       = get_cansim("36-10-0434-01") %>% rename_all(make.names) 
+
+#Gross domestic product (GDP) at basic prices, by industry, provinces and territories (x 1,000,000) annual
+GDPAnnual = get_cansim("36-10-0402-01") %>% rename_all(make.names) 
+
+#Gross domestic product (GDP) at factor cost in 1992 constant prices, by Standard Industrial Classification, 1980 (SIC), monthly (x 1,000,000)
+GDPsic = get_cansim("36-10-0377-01") %>% rename_all(make.names)
+
+```
+
+
+### Basic date cleanup
+
+```{R, cache = TRUE, eval = FALSE}
+THW = THW %>% 
+  # mutate(date = parse_date_time(REF_DATE, orders = "Y-m")) %>%# 4 digit year with 2 digit month. <-- already included
+  separate(REF_DATE, into = c("year","month"),sep = "-")
+
+THWSA = THWSA %>% 
+  # mutate(date = parse_date_time(REF_DATE, orders = "Y-m")) %>%# 4 digit year with 2 digit month. <-- already included
+  separate(REF_DATE, into = c("year","month"),sep = "-")
+
+EMP = EMP %>% 
+  # mutate(date = parse_date_time(REF_DATE, orders = "Y-m")) %>%# 4 digit year with 2 digit month. <-- already included
+  separate(REF_DATE, into = c("year","month"),sep = "-")
+
+GDP = GDP %>% 
+  # mutate(date = parse_date_time(REF_DATE, orders = "Y-m")) %>%# 4 digit year with 2 digit month.<-- already included
+  separate(REF_DATE, into = c("year","month"),sep = "-")
+
+#GDPAnnual = GDPAnnual %>% 
+  # mutate(date = parse_date_time(REF_DATE, orders = "Y-m")) %>%# 4 digit year with 2 digit month.<-- already included
+ # mutate(year= as.numeric(year)) - this seems to not do anything? 
+
+GDPsic = GDPsic %>% 
+  # mutate(date = parse_date_time(REF_DATE, orders = "Y-m")) %>%# 4 digit year with 2 digit month.<-- already included
+  separate(REF_DATE, into = c("year","month"),sep = "-")
+
+save.image("Total_hours_and_GDP.Rdata")
+
+```
+
+
+```{r loaddata, echo = FALSE}
+# loading from here to avoid re-downloading
+load("Total_hours_and_GDP.Rdata")
+```
+
+### Widen the table so that each row is a single date
+
+Starting with Total Hours Worked, note the filtering to **Both sexes** and **Total actual hours (main job)** so that rows have unique values for a given date and location.
+
+```{r, widendata,  cache = TRUE}
+
+
+THW_wide = THW%>%filter(Sex == "Both sexes") %>% 
+  filter(Class.of.worker == "Total employed")%>%
+  filter(Actual.hours.worked == "Total actual hours (main job)")%>%
+  filter(North.American.Industry.Classification.System..NAICS.!= "Goods.producing.sector" )%>%
+  filter(North.American.Industry.Classification.System..NAICS.!= "Services.producing.sector" )%>%
+  #filter(GEO != "Canada")%>% # since the Canada value will be a type of weighted average
+  select(GEO,Date,year, month,
+               North.American.Industry.Classification.System..NAICS.,
+               VALUE)%>%
+  pivot_wider(names_from= North.American.Industry.Classification.System..NAICS.,
+              values_from=VALUE) %>%  # puts each province into its own column
+  rename_all(make.names) # rebuilt the province names
+
+
+THWSA_wide = THWSA%>% 
+  filter(Statistics == "Estimate")%>%
+  filter(North.American.Industry.Classification.System..NAICS.!= "Goods.producing.sector" )%>%
+  filter(North.American.Industry.Classification.System..NAICS.!= "Services.producing.sector" )%>%
+  #filter(GEO != "Canada")%>% # since the Canada value will be a type of weighted average
+  select(GEO,Date,year, month,
+               North.American.Industry.Classification.System..NAICS.,
+               VALUE)%>%
+  pivot_wider(names_from= North.American.Industry.Classification.System..NAICS.,
+              values_from=VALUE) %>%  # puts each province into its own column
+  rename_all(make.names) # rebuilt the province names
+
+
+# Employment - need seasonally adjusted and non-seasonally adjusted
+
+EMPSA_wide = EMP%>% 
+  filter(Statistics == "Estimate")%>%
+  filter(Data.type == "Seasonally adjusted")%>%
+  filter(North.American.Industry.Classification.System..NAICS.!= "Goods.producing.sector" )%>%
+  filter(North.American.Industry.Classification.System..NAICS.!= "Services.producing.sector" )%>%
+  #filter(GEO != "Canada")%>% # since the Canada value will be a type of weighted average
+  select(GEO,Date,year, month,
+               North.American.Industry.Classification.System..NAICS.,
+               VALUE)%>%
+  pivot_wider(names_from= North.American.Industry.Classification.System..NAICS.,
+              values_from=VALUE) %>%  # puts each province into its own column
+  rename_all(make.names) # rebuilt the province names
+
+##
+
+EMPNSA_wide = EMP%>%
+  filter(Statistics == "Estimate")%>%
+  filter(Data.type == "Unadjusted")%>%
+  filter(North.American.Industry.Classification.System..NAICS.!= "Goods.producing.sector" )%>%
+  filter(North.American.Industry.Classification.System..NAICS.!= "Services.producing.sector" )%>%
+  #filter(GEO != "Canada")%>% # since the Canada value will be a type of weighted average
+  select(GEO,Date,year, month,
+               North.American.Industry.Classification.System..NAICS.,
+               VALUE)%>%
+  pivot_wider(names_from= North.American.Industry.Classification.System..NAICS.,
+              values_from=VALUE) %>%  # puts each province into its own column
+  rename_all(make.names) # rebuilt the province names
+
+
+
+```
+
+
+## 2012 constant or chained dollars
+Note the decisions that need to be made for GDP include filtering on some variables.  Consider these price options:
+```{r exploreGDP, cache=TRUE}
+GDP %>% 
+  filter(GEO =="Canada")%>%
+  filter(Seasonal.adjustment=="Seasonally adjusted at annual rates")%>%
+  select(Prices)%>% table %>% names %>% sort
+
+```
+
+But the options available differ when considering the annual GDP per sector, per province:
+```{r exploreGDPAnnual, cache=TRUE}
+GDPAnnual %>% 
+  filter(GEO =="Canada")%>%
+  select(Value)%>% table %>% names %>% sort
+
+```
+
+To be consistent it will force us to select **Chained (2012) dollars**.  
+```{r}
+  dollars2use = "Chained (2012) dollars"
+# dollars2use = "2012 constant prices"
+```
+
+## NAICS
+There are a lot of different values in the NAICS in the GDP datasets, fortunately they aling between the two GDP datasets.  Here are 15 of them:
+```{r exploreGDP2, cache=TRUE}
+
+GDP %>% 
+  filter(GEO =="Canada")%>%
+  filter(Seasonal.adjustment=="Seasonally adjusted at annual rates")%>%
+  filter(Prices==dollars2use)%>%
+  select(  North.American.Industry.Classification.System..NAICS.)%>% 
+  table %>% names %>% sort %>% head(15)
+
+#GDPretro %>% 
+#  filter(GEO =="Canada")%>%
+#  filter(Seasonal.adjustment=="Seasonally adjusted")%>%
+#  select(Standard.Industrial.Classification..1980..SIC.)%>% 
+#  table %>% names %>% sort %>% head(15)
+
+# 
+# GDPAnnual %>% 
+#   filter(GEO =="Canada")%>%
+#   filter(Value==dollars2use)%>%
+#   select(North.American.Industry.Classification.System..NAICS.)%>% 
+#   table %>% names %>% sort %>% head(15)
+
+```
+
+
+Reducing down to a smaller set of of values from the NAICS hierarchy.
+
+```{r andrevalues, cache = TRUE}
+
+NAICS_higher_levels = c(
+"All industries [T001]",
+"Agriculture, forestry, fishing and hunting [11]",
+"Mining, quarrying, and oil and gas extraction [21]",	
+"Utilities [22]",
+"Construction [23]",
+"Manufacturing [31-33]",
+"Wholesale trade [41]",
+"Retail trade [44-45]",
+"Transportation and warehousing [48-49]",
+"Information and cultural industries [51]",
+"Finance and insurance [52]",
+"Real estate and rental and leasing [53]",
+"Professional, scientific and technical services [54]",
+"Management of companies and enterprises [55]",
+"Administrative and support, waste management and remediation services [56]",
+"Educational services [61]",
+"Health care and social assistance [62]",
+"Arts, entertainment and recreation [71]",
+"Accommodation and food services [72]",
+"Other services (except public administration) [81]",
+"Public administration [91]")
+
+GDP_wide = 
+  GDP %>% 
+  filter(Seasonal.adjustment=="Seasonally adjusted at annual rates")%>%
+  filter(Prices==dollars2use)%>%
+  filter(North.American.Industry.Classification.System..NAICS. %in%NAICS_higher_levels)%>%
+  select(GEO,Date,year, month,
+               North.American.Industry.Classification.System..NAICS.,
+               VALUE)%>%
+  pivot_wider(names_from= North.American.Industry.Classification.System..NAICS., 
+              values_from=VALUE) %>%  # puts each province into its own column
+  rename_all(make.names) # rebuilt the NAICS names
+
+GDPAnnual_wide = 
+  GDPAnnual %>% 
+  filter(Value==dollars2use)%>%
+  filter(North.American.Industry.Classification.System..NAICS. %in%NAICS_higher_levels)%>%
+  select(GEO,Date, 
+               North.American.Industry.Classification.System..NAICS.,
+               VALUE)%>%
+  pivot_wider(names_from= North.American.Industry.Classification.System..NAICS., 
+              values_from=VALUE) %>%  # puts each province into its own column
+  rename_all(make.names) # rebuilt the NAICS names
+
+
+
+```
+
+Selecting SIC codes that can be matched with NAICS
+
+```{r andrevalues, cache = TRUE}
+SIC_NAICS_common = c(
+  "All industries",
+  "Agricultural and related services industries",
+  "Fishing and trapping industries",
+  "Logging and forestry industries",
+  "Mining (including milling), quarrying and oil well industries",
+  "Manufacturing industries",
+  "Construction industries",
+  "Transportation and storage industries",
+  "Communication industries",
+  "Other utility industries",
+  "Wholesale trade industries",
+  "Retail trade industries",
+  "Finance, insurance and real estate industries",
+  "Business services industries",
+  "Government service industries",
+  "Educational service industries",
+  "Health and social service industries",
+  "Accommodation, food and beverage service industries",
+  "Other service industries",
+  "Amusement and recreational service industries",
+  "Postal and courier service industries")
+  
+GDPsic_wide = 
+  GDPsic %>% 
+  filter(Seasonal.adjustment=="Seasonally adjusted")%>%
+  filter(Standard.Industrial.Classification..1980..SIC. %in% SIC_NAICS_common)%>%
+  select(GEO,Date,year, month,
+               Standard.Industrial.Classification..1980..SIC.,
+               VALUE)%>%
+  pivot_wider(names_from= Standard.Industrial.Classification..1980..SIC., 
+              values_from=VALUE) %>%  # puts each province into its own column
+  rename_all(make.names) # rebuilt the SIC names
+
+```
+
+
+
+## making THW and GDP comparable
+
+Some NAICS categories do not completely overlap across the THW and GDP datasets.  Combine categories accordingly.
+
+```{r}
+
+GDP_wide = GDP_wide %>%
+  mutate(Agriculture..forestry..fishing.and.hunting..11.mining.21   =  Agriculture..forestry..fishing.and.hunting..11. +Mining..quarrying..and.oil.and.gas.extraction..21.)%>%
+  mutate(Wholesale.and.retail.trade..41..44.45.                     = Wholesale.trade..41.+Retail.trade..44.45.)%>%
+  mutate(Finance..insurance..real.estate..rental.and.leasing..52.53. = Finance.and.insurance..52.+Real.estate.and.rental.and.leasing..53.)%>%
+  mutate(Information..culture.and.recreation..51..71.                = Arts..entertainment.and.recreation..71.+Information.and.cultural.industries..51.)
+
+
+GDPAnnual_wide = GDPAnnual_wide %>%
+  mutate(Agriculture..forestry..fishing.and.hunting..11.mining.21   =  Agriculture..forestry..fishing.and.hunting..11. +Mining..quarrying..and.oil.and.gas.extraction..21.)%>%
+  mutate(Wholesale.and.retail.trade..41..44.45.                     = Wholesale.trade..41.+Retail.trade..44.45.)%>%
+  mutate(Finance..insurance..real.estate..rental.and.leasing..52.53. = Finance.and.insurance..52.+Real.estate.and.rental.and.leasing..53.)%>%
+  mutate(Professional..scientific.and.technical.services..54.       = Management.of.companies.and.enterprises..55.+Administrative.and.support..waste.management.and.remediation.services..56.+Professional..scientific.and.technical.services..54.)%>%
+  mutate(Information..culture.and.recreation..51..71.                = Arts..entertainment.and.recreation..71.+Information.and.cultural.industries..51.)
+
+
+GDPsic_wide = GDPsic_wide %>%
+  mutate(Agriculture..forestry..fishing.and.hunting..11.mining.21 = Agricultural.and.related.services.industries + Fishing.and.trapping.industries + Logging.and.forestry.industries + Mining..including.milling...quarrying.and.oil.well.industries)%>%
+  mutate(Wholesale.and.retail.trade..41..44.45. = Wholesale.trade.industries + Retail.trade.industries)%>%
+  mutate(Transportation.and.warehousing..48.49. = Transportation.and.storage.industries + Postal.and.courier.service.industries)%>%
+  mutate(Information..culture.and.recreation..51..71. = Communication.industries - Postal.and.courier.service.industries + Amusement.and.recreational.service.industries) %>%
+mutate(Other.service.industries = Other.service.industries - Amusement.and.recreational.service.industries)
+
+
+```
+
+
+### Sanity check for entire sample
+
+```{r}
+
+GDP.variables = c("Utilities..22.",
+      "Construction..23.",                                      
+      "Manufacturing..31.33.",  
+      "Transportation.and.warehousing..48.49.", 
+      "Educational.services..61.",                      
+      "Health.care.and.social.assistance..62.",
+      "Accommodation.and.food.services..72.",
+      "Other.services..except.public.administration...81.",
+      "Public.administration..91.",
+      "Agriculture..forestry..fishing.and.hunting..11.mining.21",
+      "Wholesale.and.retail.trade..41..44.45.",
+      "Finance..insurance..real.estate..rental.and.leasing..52.53.",
+      "Professional..scientific.and.technical.services..54.", 
+      "Information..culture.and.recreation..51..71.")
+
+eval(parse(text=
+     # view the line of code generated by running with the glue command        
+             glue(paste0("GDP_post1996 = GDP_wide %>%  mutate(All.industries.ours = ", paste({GDP.variables},collapse='+'),")"))
+           )
+     )
+
+
+#plot to make sure that our combination = the stated combination
+GDP_post1996%>% ggplot()+
+  geom_point(aes(x=All.industries.ours, y=All.industries..T001., colour = year))
+
+
+
+eval(parse(text=
+     # view the line of code generated by running with the glue command        
+             glue(paste0("GDPAnnual_post1996 = GDPAnnual_wide %>%  mutate(All.industries.ours = ", paste({GDP.variables},collapse='+'),")"))
+           )
+     )
+
+#now for GDPsic - replace these with SIC codes
+
+GDPSIC.variables = c("Manufacturing.industries", "Construction.industries", "Other.utility.industries", "Finance..insurance.and.real.estate.industries", "Business.services.industries", "Government.service.industries", "Educational.service.industries", "Health.and.social.service.industries", "Accommodation..food.and.beverage.service.industries", "Other.service.industries", "Agriculture..forestry..fishing.and.hunting..11.mining.21", "Wholesale.and.retail.trade..41..44.45.", "Transportation.and.warehousing..48.49.", "Information..culture.and.recreation..51..71.")
+
+eval(parse(text=
+     # view the line of code generated by running with the glue command        
+             glue(paste0("GDP_pre1997 = GDPsic_wide %>%  mutate(All.industries.ours = ", paste({GDPSIC.variables},collapse='+'),")"))
+           )
+     )
+
+#plot to make sure that our combination = the stated combination
+GDP_pre1997%>% ggplot()+
+  geom_point(aes(x=All.industries.ours, y=All.industries, colour = year))
+
+```
+
+##need to impute values for pre-2007 management - NAICS possible solutions include (1) grow it backwards at the rate of GDP growth (2) regress management 2007- on GDP, use estimated relationship to impute (3) estimate relationship between management and all industries 
+
+
+```{r}
+
+#(1)
+#value of management in dec 2006 x 1 - growth rate of gdp in January 2007 
+
+#create variable for GDP growth rate:
+GDP_post1996 = GDP_post1996 %>% 
+   arrange(Date) %>%
+mutate(GDP_growth=All.industries..T001./lag(All.industries..T001.)-1) 
+
+#(1) Looping backward from 2006-12-01:
+
+start     <- as.Date("06-12-01",format="%y-%m-%d")
+end   <- as.Date("97-01-01",format="%y-%m-%d")
+
+theDate <- start
+
+while (theDate >= end){
+  GDP_post1996 = GDP_post1996 %>% mutate(Management.of.companies.and.enterprises..55. = case_when( (Date < as.Date("2007-01-01")) ~ lead(Management.of.companies.and.enterprises..55.)*(1-lead(GDP_growth)),(Date >= as.Date("2007-01-01")) ~ Management.of.companies.and.enterprises..55.))
+  theDate <- theDate - 1}
+
+GDP_post1996 = GDP_post1996 %>% 
+ mutate(Professional..scientific.and.technical.services..54.       = Management.of.companies.and.enterprises..55.+Administrative.and.support..waste.management.and.remediation.services..56.+Professional..scientific.and.technical.services..54.)
+
+ eval(parse(text=
+     # view the line of code generated by running with the glue command        
+             glue(paste0("GDP_post1996 = GDP_post1996 %>%  mutate(All.industries.ours = ", paste({GDP.variables},collapse='+'),")"))
+           )
+     )
+ 
+
+
+#we now have a complete GDP_post1996 table with no NA values
+ 
+
+ 
+```
+
+
+### Check which variables were now left out from crafting our total
+Compare these to the list in the previous chunk that was used to build **totals.hours.ours**.  Note that above, some of these _leftover_ variables were already used (eg. mining + agriculture).
+
+```{r}
+# for book keeping
+setdiff(colnames(GDP_post1996),GDP.variables)
+setdiff(colnames(GDP_pre1997),GDPSIC.variables)
+```
+
+
+### This time with Total Hours Worked and employment
+
+```{r}
+
+
+THW.variables = c(
+  "Agriculture..111.112..1100..1151.1152.",
+  "Forestry..fishing..mining..quarrying..oil.and.gas..21..113.114..1153..2100.",
+  "Utilities..22.",
+  "Construction..23.",
+  "Manufacturing..31.33.",
+  "Wholesale.and.retail.trade..41..44.45.",
+  "Transportation.and.warehousing..48.49.",
+  "Finance..insurance..real.estate..rental.and.leasing..52.53.",
+  "Professional..scientific.and.technical.services..54.", 
+  "Business..building.and.other.support.services..55.56.",
+  "Educational.services..61.",
+  "Health.care.and.social.assistance..62.",
+  "Information..culture.and.recreation..51..71.",               
+  "Accommodation.and.food.services..72.",
+  "Other.services..except.public.administration...81.",             
+  "Public.administration..91.")
+
+
+eval(parse(text=
+     # view the line of code generated by running with the glue command        
+             glue(paste0("THW_post1986 = THW_wide %>% mutate(totals.hours.ours = ", paste({THW.variables},collapse='+'),")"))
+           )
+     )
+
+#plot to make sure that our combination = the stated combination
+THW_post1986 %>% ggplot()+
+  geom_point(aes(x=totals.hours.ours, y=Total.employed..all.industries, colour = GEO))+
+  geom_abline(slope=1,intercept=0)
+
+THW_post1986 <- THW_post1986 %>% select(-contains(".sector"))
+
+# Repeat for others:
+
+eval(parse(text=
+     # view the line of code generated by running with the glue command        
+             glue(paste0("THWSA_post1986 = THWSA_wide %>% mutate(totals.hours.ours = ", paste({THW.variables},collapse='+'),")"))
+           )
+     )
+
+
+THWSA_post1986 <- THWSA_post1986 %>% select(-contains(".sector"))
+
+
+#
+
+eval(parse(text=
+     # view the line of code generated by running with the glue command        
+             glue(paste0("EMPSA_post1986 = EMPSA_wide %>% mutate(totals.emp.ours = ", paste({THW.variables},collapse='+'),")"))
+           )
+     )
+
+EMPSA_post1986 <- EMPSA_post1986 %>% select(-contains(".sector"))
+
+#
+
+eval(parse(text=
+     # view the line of code generated by running with the glue command        
+             glue(paste0("EMPNSA_post1986 = EMPNSA_wide %>% mutate(totals.emp.ours = ", paste({THW.variables},collapse='+'),")"))
+           )
+     )
+
+EMPNSA_post1986 <- EMPNSA_post1986 %>% select(-contains(".sector"))
+
+
+```
+
+```{r}
+# for book keeping
+setdiff(colnames(THW_post1986),THW.variables)
+```
+## We need to create a seasonal factor for employment 
+
+```{r}
+
+
+EMPSA1 <- subset (EMPSA_post1986, select = -c(GEO,Date,year,month))
+EMPNSA1 <- subset (EMPNSA_post1986, select = -c(GEO,Date,year,month))
+info_columns <- subset (EMPSA_post1986, select = c(GEO,Date,year,month))
+
+EMPSF_post1986 <- cbind(info_columns, EMPSA1/EMPNSA1)
+
+EMPSF_post1986 <- subset(EMPSF_post1986, Date > as.Date("1986-12-01"))
+
+
+
+```
+
+## We need a seasonal factor for THW for Canada
+
+```{r}
+# Create seasonal factor for Canada by hours
+
+THWNSA_wide = THW%>%filter(Sex == "Both sexes") %>% 
+  filter(Class.of.worker == "Total employed")%>%
+  filter(Actual.hours.worked == "Total actual hours (main job)")%>%
+  filter(North.American.Industry.Classification.System..NAICS.!= "Goods.producing.sector" )%>%
+  filter(North.American.Industry.Classification.System..NAICS.!= "Services.producing.sector" )%>%
+  filter(GEO == "Canada")%>% 
+  select(GEO,Date,year, month,
+               North.American.Industry.Classification.System..NAICS.,
+               VALUE)%>%
+  pivot_wider(names_from= North.American.Industry.Classification.System..NAICS.,
+              values_from=VALUE) %>%  # puts each province into its own column
+  rename_all(make.names) # rebuilt the province names
+
+eval(parse(text=
+     # view the line of code generated by running with the glue command        
+             glue(paste0("THWNSA_post1986 = THWNSA_wide %>% mutate(totals.hours.ours = ", paste({THW.variables},collapse='+'),")"))
+           )
+     )
+
+THWNSA_post1986 <- THWNSA_post1986 %>% select(-contains(".sector"))
+
+
+THWSA1 <- subset (THWSA_post1986, Date > as.Date("1986-12-01"), select = -c(GEO,Date,year,month))
+THWNSA1 <- subset (THWNSA_post1986, select = -c(GEO,Date,year,month))
+info_columns <- subset (THWNSA_post1986, select = c(GEO,Date,year,month))
+
+THWSF_post1986 <- cbind(info_columns, THWSA1/THWNSA1)
+
+# get ride of spaces in province names
+
+THWSF_post1986 = THWSF_post1986 %>%
+mutate(GEO=str_replace_all(GEO,pattern=" ", replacement="."))
+
+EMPSF_post1986 = EMPSF_post1986 %>%
+mutate(GEO=str_replace_all(GEO,pattern=" ", replacement="."))
+
+THW_post1986 = THW_post1986 %>%
+mutate(GEO=str_replace_all(GEO,pattern=" ", replacement="."))
+
+province_index = select(EMPSF_post1986, GEO)%>%unique()
+
+
+```
+
+## We want to reshape the long SF tables into  wide table 
+
+```{r}
+EMPSF_post1986 <- pivot_wider(EMPSF_post1986, names_from = "GEO", values_from =c(contains(".")))
+
+EMPSF_post1986 <- EMPSF_post1986 %>% select(-contains("year"))
+EMPSF_post1986 <- EMPSF_post1986 %>% select(-contains("month"))
+
+#
+
+THWSF_post1986 <- pivot_wider(THWSF_post1986, names_from = "GEO", values_from =c(contains(".")))
+
+THWSF_post1986 <- THWSF_post1986 %>% select(-contains("year"))
+THWSF_post1986 <- THWSF_post1986 %>% select(-contains("month"))
+
+# 
+
+THW_post1986 <- pivot_wider(THW_post1986, names_from = "GEO", values_from =c(contains(".")))
+
+THW_post1986 <- THW_post1986 %>% select(-contains("year"))
+THW_post1986 <- THW_post1986 %>% select(-contains("month"))
+
+
+
+
+# Take THW_post1986 dataframe, multiply it by the ratio of two columns in the EMPSF_post1986 dataframe - (NAICS_prov/NAICS_Canada)*THW_post1986
+# make a for loop over province
+
+
+eval(parse(text=
+     # view the line of code generated by running with the glue command        
+             glue(paste0("EMPSF_ratio = EMPSF_post1986 %>% select( paste0({THW.variables},'_', province_index, '/', {THW.variables},'_', Canada)"))
+     )
+     )
+           
+
+
+eval(parse(text=
+     # view the line of code generated by running with the glue command        
+             paste0(EMPSF_ratio = EMPSF_post1986 %>% select( paste0(glue("{THW.variables}_Ontario"), '/', glue("{THW.variables}_Canada"))))
+        )
+     )
+     
+
+  
+```
+
+
+
+
+## Now, using the employment and hours seasonal factors, we can create a final seasonal adjustment factor for each province - note, THWSF is only at the national level
+
+```{r}
+
+THW_test <- subset (THW_post1986, Date > as.Date("2021-12-01"), select = c(Date, Agriculture..111.112..1100..1151.1152._Canada, Agriculture..111.112..1100..1151.1152._Ontario, Agriculture..111.112..1100..1151.1152._Quebec))
+
+THWSF_test <- subset (THWSF_post1986, Date > as.Date("2021-12-01"), select = c(Date, Agriculture..111.112..1100..1151.1152._Canada))
+
+
+EMPSF_test <- subset (EMPSF_post1986, Date > as.Date("2021-12-01"), select = c(Date, Agriculture..111.112..1100..1151.1152._Canada, Agriculture..111.112..1100..1151.1152._Ontario, Agriculture..111.112..1100..1151.1152._Quebec))
+
+dftest <- THW_test["Agriculture..111.112..1100..1151.1152._Ontario"]*THWSF_test["Agriculture..111.112..1100..1151.1152._Canada"]*EMPSF_test[3]/EMPSF_test[2]
+
+THW_test <- subset (THW_post1986, Date > as.Date("2021-12-01"), select = c(Date, select(c(contains("Agriculture.", "Manufacturing.")))))
+
+
+select(THW_test,matches("Ontario") & matches ("Agriculture"))
+
+clist <- c("Ontario", "Quebec")
+for (i in clist) {
+THW_test[i] <- select(THW_test,contains(i))
+   }
+
+
+select(c(-contains("Canada")))
+select(c(contains("Canada")))
+
+
+
+
+SF_post1986 = THWSF_post1986
+
+```
+ 
+
+### Check which variables were now left out from crafting our total
+Compare these to the list in the previous chunk that was used to build **totals.hours.ours**.  Note that above, some of these _leftover_ variables were already used (eg. mining + agriculture).
+
+
+
+## Save the modified data sets:
+```{r}
+
+THW_post1986      %>% write_csv(file = paste0(location,"1.c-Data_From_Cansim-total_hours_worked.csv"))
+THWSA_post1986      %>% write_csv(file = paste0(location,"1.c-Data_From_Cansim-total_hours_worked_SA.csv"))
+EMPSA_post1986      %>% write_csv(file = paste0(location,"1.c-Data_From_Cansim-employment_SA.csv"))
+EMPNSA_post1986      %>% write_csv(file = paste0(location,"1.c-Data_From_Cansim-employment_NSA.csv"))
+GDP_post1996       %>% write_csv(file = paste0(location,"1.c-Data_From_Cansim-GDP.csv"))
+GDPAnnual_post1996 %>% write_csv(file = paste0(location,"1.c-Data_From_Cansim-GDPAnnual.csv"))
+GDP_pre1997       %>% write_csv(file = paste0(location,"1.c-Data_From_Cansim-GDPretro.csv"))
+
+save("THW_post1986", "THWSA_post1986", "EMPSA_post1986", "EMPNSA_post1986",  "GDP_post1996", "GDPAnnual_post1996", "GDP_pre1997",
+     "THW.variables", "GDP.variables", "GDPSIC.variables",
+file = paste0(location,"1.c-Data_From_Cansim-GDP_and_total_hours_worked.Rdata"))
+```
+
+
+# To do from here
+
+- Obtain the GDP share per sector for a given year.
+- Convert that into GDP share per province per sector using _Total Hours Worked_.

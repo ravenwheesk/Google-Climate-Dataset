@@ -1,0 +1,511 @@
+---
+title: "Mapping LFS using Census Subdivisions"
+author: "Dave Campbell"
+date: "15/11/2021"
+output: html_document
+---
+
+File in progress.  For now this plots the fraction of the provincial NAICS that is within a subdivision.  Later this could be extended to employment within a NAICS within a subdivision, or considering the productivity per person (or GDP) within a NAICS within a subdivision.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Basic R session info
+```{r library, warning = FALSE, message = FALSE}
+#using R:
+library(tidyverse)  # data manipulation and piping
+library(data.table) # renaming columns in bulk using 'setnames'
+library(plyr)       # recoding factor levels using 'mapvalues'  
+library(sf)         # to handle census subdivision polygons
+library(stringr)    # look for spcific provinces and csv files 
+library(glue)       # dynamic variable names
+library(ggpubr)     # plotting layouts
+library(leaflet)    # interactive plots vis java
+
+# set up data location:
+location = "R:/mfa/data_sci_div/Google Climate Project/"
+
+```
+
+
+# Outline of this Markdown
+
+Loop over all province and territory names, load a region, then obtain the fraction within a census subdivision and obtain the fraction within NAICS.  Finally, compile national data frames.
+
+This process is repeated with Census Subdivisions and Dissemination Areas.  Since Dissemination Areas are smaller, these create much larger datafiles and have many more polygons defining their boundaries, so they take longer to plot.
+
+# Load the Data 
+Start by loading the provincial encodings
+```{r dataload, message = FALSE, warning = FALSE, eval = TRUE}
+
+province_codings = read_csv( paste0(location, file ='1.a_province_codings.csv'))
+
+# variable mapping LFS to census
+# dictionary for converting NAICS code names across data types:
+full_dict_new <- read_csv( paste0(location, "2.c_full_dict_mapping_THW_GDP_LFS_Census.csv"))
+naics_census_vars <- full_dict_new %>% pull(census)  %>% unique
+
+```
+
+The datafiles are held as **rds** files because it makes it easier to attach the geometries for the census boundaries.  These are named using their province. Here we loop over province to load data files, perform calculations, and save them individually.  Note that all output is saved in a corresponding **4.a_census_fraction_of_subdivision_data** folder.
+
+
+
+```{r FracInNAIC_csd, warning = FALSE, message = FALSE, cache = TRUE, eval = FALSE}
+
+for(Province in province_codings$abv){
+  # use this to tag provinces for simplified merging in later files.
+  provincename = province_codings%>% filter(abv == Province) %>% pull( province)
+  
+  
+# Find the appropriate census file to load
+# load the rds since it loads the geometries nicely
+# read_csv reads the geometry as a character
+Census_filename = paste0(location, '1.a-Census2016-data/1.a_census_data_',Province,'.rds')
+census_data_ind = read_rds(Census_filename) 
+
+
+# Census Fraction of Provincial Population Working in an Industry
+# Obtain the fraction of the people working in a NAIC code industry within a census subdivision.   
+# It might be worth considering a few other demographic variables along the way.  
+# Eventually want to use multiply the productivity with the fraction of the NAICS code within a subdivision to obtain the productivity per NAICS per census division.  
+
+
+
+province_digits = province_codings %>% filter(abv == Province) %>% select(code)
+Provincial_population_total = census_data_ind %>% filter(PR_UID == province_digits) %>% summarize(total = sum(Population))
+
+# Focus on key variables of interest
+fraction_of_NAIC_in_subdivision = census_data_ind %>% 
+                         filter(PR_UID == province_digits) %>% 
+                         select(Population, all_of(naics_census_vars), geometry, GeoUID, Region.Name) %>% 
+                         mutate(frac_of_province = Population / sum(Population))
+
+# Obtain the fraction of the NAICS individuals for the province within a subdivision for all NAICS coded variables that match across datasets.
+eval(parse(text = 
+             glue(paste0("fraction_of_NAIC_in_subdivision = fraction_of_NAIC_in_subdivision%>% mutate(",
+             "frac_in_csd_{naics_census_vars} = {naics_census_vars}/sum({naics_census_vars}, na.rm=TRUE));"))
+             )
+     )
+     
+# could make plots for each province:
+# plot_list = list()
+# for(var in 1:length(naics_census_vars)){
+#   variable = paste0('frac_in_csd_',naics_census_vars)[var]
+#   plot_list[[var]] = fraction_of_NAIC_in_subdivision %>% ggplot(aes_string(fill = variable)) +
+#                       geom_sf(aes(geometry = geometry), na.rm = TRUE) +
+#     theme(legend.position = "bottom") +
+#     #scale_fill_gradient(limits =c(0, 1))+ # common scaling is not useful here
+#     ggtitle(paste("Fraction of provincial\n",variable,"\nNAICS individuals in each census region"))
+#   
+# }
+# #note the use of aes_string to dynamically select the variable to plot
+# 
+# ggarrange(plotlist = plot_list, ncol=2)
+
+
+
+fraction_of_NAIC_in_subdivision  %>% 
+  mutate(provincename = provincename)%>% 
+  write_rds(file = paste0(location, '4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_NAIC_in_csd_',Province,'.rds'))
+                               
+
+# Most Economically important NAICS industry in the census subdivision (by population working in that sector)
+# It might be worth considering a few other demographic variables along the way.
+# For now we need the fraction of the people within a NAIC code within a census subdivision.
+# **Note that counts from within NAICS categories may not add up to the population despite 
+# all this coming from the same census.**  Some individuals might be in multiple NAICS codes or in no NAICS codes.
+### Start with finding the dominant NAICS category within the census region
+
+
+
+# Focus on key variables of interest
+fraction_of_subdivision_in_NAICS = census_data_ind %>% 
+                         filter(PR_UID == province_digits) %>% 
+                         select(Population, all_of(naics_census_vars), geometry, GeoUID, Region.Name) 
+# find the total NAICS count within a subdivision:
+
+eval(parse(text = paste("fraction_of_subdivision_in_NAICS = fraction_of_subdivision_in_NAICS %>% mutate(tot_naics=",paste(naics_census_vars,collapse="+"),")")))
+
+# find the fraction of the subdivision in a NAICS category:
+eval(parse(text = 
+             glue(paste0("fraction_of_subdivision_in_NAICS = fraction_of_subdivision_in_NAICS%>% mutate(",
+                  "frac_in_naics_{naics_census_vars}","= {naics_census_vars}/tot_naics);"))
+           )
+     )
+
+
+# Find the dominant NAICS category in a subdivision
+# We can't directly obtain the maximum over a set of columns when the geometries are attached because all operations are also attempted on the MULTIPOLYGON
+
+max_index = max.col(st_set_geometry(fraction_of_subdivision_in_NAICS[,naics_census_vars], NULL))
+
+fraction_of_subdivision_in_NAICS = fraction_of_subdivision_in_NAICS %>%
+  mutate(Dominant_NAICS = naics_census_vars[max_index])%>%
+  mutate(colourval = plyr::mapvalues(Dominant_NAICS, from = full_dict_new$census, to = full_dict_new$colours2use))
+
+
+# make a plot 
+# fraction_of_subdivision_in_NAICS %>% ggplot() +
+#                       geom_sf(aes(fill = Dominant_NAICS, geometry = geometry), na.rm = TRUE) +
+#     theme(legend.position = "bottom",legend.title = element_blank()) +
+#     ggtitle("Dominant NAICS category within in each census region")
+# 
+
+
+### Next plot the fraction of the census region that works in the NAICS category
+
+# could make plots for each province:
+# plot_list = list()
+# for(var in 1:length(unique(naics_census_vars))){
+#   variable = unique(naics_census_vars)[var]
+#   plot_list[[var]] = fraction_of_subdivision_in_NAICS %>% ggplot(aes_string(fill = variable)) +
+#                       geom_sf(aes(geometry = geometry), na.rm = TRUE) +
+#     theme(legend.position = "bottom") +
+#     #scale_fill_gradient(limits =c(0, 1))+ # common scaling is not useful here
+#     ggtitle(paste("Fraction of census subdivision in \n",variable))
+#   
+# }
+# #note the use of aes_string to dynamically select the variable to plot
+# 
+# ggarrange(plotlist = plot_list, ncol=2)
+
+  
+
+fraction_of_subdivision_in_NAICS  %>% 
+  mutate(provincename = provincename)%>% 
+  write_rds(file = paste0(location,'4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_csd_in_NAICS_',Province,'.rds'))
+
+}
+```
+
+
+
+# Similary construct the Canada-wide files
+
+
+Loop over all the provinces and stack their data files to make a big one for Canada.  Save it for later.
+
+This could have been done within the above for-loop but for expositional clarity is split apart into a new section.  A Canada-wide plot of the dominant NAICS code within a census subdivision is included.
+
+```{r FracInNAIC_csd_canada, cache = TRUE, eval = FALSE}
+  
+fraction_of_subdivision_in_NAICS = NULL 
+fraction_of_NAIC_in_subdivision  = NULL
+for(Province in province_codings %>% pull(abv)){
+
+  fraction_of_subdivision_in_NAICS  = rbind(fraction_of_subdivision_in_NAICS, 
+                                            read_rds(file = paste0(location, '4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_csd_in_NAICS_',Province,'.rds'))%>% mutate(province = Province))
+  fraction_of_NAIC_in_subdivision   = rbind(fraction_of_NAIC_in_subdivision, 
+                                            read_rds(file = paste0(location, '4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_NAIC_in_csd_',Province,'.rds'))%>% mutate(province = Province))
+}
+
+
+fraction_of_subdivision_in_NAICS %>%
+                   write_rds(file = paste0(location, '4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_csd_in_NAICS_Canada.rds'))
+fraction_of_NAIC_in_subdivision  %>% 
+                   write_rds(file = paste0(location, '4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_NAIC_in_csd_Canada.rds'))
+
+
+```
+
+
+```{r, eval = TRUE, include = FALSE}
+fraction_of_subdivision_in_NAICS = read_rds(file = paste0(location, '4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_csd_in_NAICS_Canada.rds'))
+
+```
+
+# make a plot
+
+```{r plot1, eval = TRUE, include = TRUE}
+
+colmat = full_dict_new%>% select(colours2use,census)%>% unique()
+colvec = colmat$colours2use 
+names(colvec) = colmat$census
+fraction_of_subdivision_in_NAICS %>% filter(province == "PE") %>% ggplot() +
+                      geom_sf(aes(fill = Dominant_NAICS, geometry = geometry), na.rm = TRUE) +
+  scale_fill_manual(values = colvec)+
+    theme(legend.position = "bottom",legend.title = element_blank()) +
+    ggtitle("Dominant NAICS category within in each census region")
+
+
+
+#  make more plots of NAICS in region
+# plot_list = list()
+# for(var in 1:length(unique(naics_census_vars))){
+#   variable = unique(naics_census_vars)[var]
+#   plot_list[[var]] = fraction_of_NAIC_in_subdivision %>% ggplot(aes_string(fill = variable)) +
+#                       geom_sf(aes(geometry = geometry), na.rm = TRUE) +
+#     theme(legend.position = "bottom") +
+#     #scale_fill_gradient(limits =c(0, 1))+ # common scaling is not useful here
+#     ggtitle(paste("Fraction of Provincial\n",variable,"\nNAICS individuals in each census region"))
+# 
+# }
+# #note the use of aes_string to dynamically select the variable to plot
+# 
+# ggarrange(plotlist = plot_list, ncol=2)
+
+
+```
+
+
+
+# Try some leaflet plots as this java library will allow better zoom functionality.
+
+
+
+
+```{r FracInNAIC_leaflet, cache = FALSE, eval = TRUE}
+data2use = fraction_of_subdivision_in_NAICS%>% filter(province=="PE")
+
+labels <- sprintf(
+  "<strong>%s</strong>",
+  as.character(fraction_of_subdivision_in_NAICS$Region.Name)
+) %>% lapply(htmltools::HTML)
+
+
+pal <- colorNumeric(
+  palette = "Reds",
+  domain = c(0,1))
+
+fraction_of_subdivision_in_NAICS %>% 
+  leaflet()%>%
+     addPolygons(fillColor = ~pal(frac_in_naics_X11.Agriculture.forestry.fishing.hunting.21.Mining.quarrying.and.oil.and.gas.extraction),
+                   weight = 2,
+                 fillOpacity = 1,
+                 highlightOptions = highlightOptions(
+    weight = 5,
+    bringToFront = TRUE),
+    label = labels,
+  labelOptions = labelOptions(
+    style = list("font-weight" = "normal", padding = "3px 8px"),
+    textsize = "15px",
+    direction = "auto"))
+     
+
+```
+
+
+
+
+
+### See Also
+
+These plots are also produced in the Shiny App in the folder **4.a.ShinyApp**
+
+
+
+# This could be run as a script by extracting the R code
+Convert this markdown into a script by running this line:
+```{r, eval = FALSE}
+knitr::purl("4.a-Mapping_with_census_subdivisions.Rmd")
+```
+
+# Re-run the above code for Dissemination Areas
+
+
+```{r FracInNAIC_DA, warning = FALSE, message = FALSE, cache = TRUE, eval = FALSE}
+
+for(Province in province_codings$abv){
+  # use this to tag provinces for simplified merging in later files.
+  provincename = province_codings%>% filter(abv == Province) %>% pull( province)
+  
+  
+# Find the appropriate census file to load
+# load the rds since it loads the geometries nicely
+# read_csv reads the geometry as a character
+Census_filename = paste0(location, '1.a-Census2016-data/1.a_census_data_',Province,'_DA.rds')
+census_data_ind = read_rds(Census_filename) 
+
+
+# Census Fraction of Provincial Population Working in an Industry
+# Obtain the fraction of the people working in a NAIC code industry within a census DA.   
+# It might be worth considering a few other demographic variables along the way.  
+# Eventually want to use multiply the productivity with the fraction of the NAICS code within a DA to obtain the productivity per NAICS per census division.  
+
+
+
+province_digits = province_codings %>% filter(abv == Province) %>% select(code)
+Provincial_population_total = census_data_ind %>% filter(PR_UID == province_digits) %>% summarize(total = sum(Population))
+
+# Focus on key variables of interest
+fraction_of_NAIC_in_DA = census_data_ind %>% 
+                         filter(PR_UID == province_digits) %>% 
+                         select(Population, all_of(naics_census_vars), geometry, GeoUID, Region.Name) %>% 
+                         mutate(frac_of_province = Population / sum(Population))
+                         
+# Obtain the fraction of the NAICS individuals for the province within a DA for all NAICS coded variables that match across datasets.
+eval(parse(text = 
+             glue(paste0("fraction_of_NAIC_in_DA = fraction_of_NAIC_in_DA%>% mutate(",
+             "frac_in_DA_{naics_census_vars} = {naics_census_vars}/sum({naics_census_vars}, na.rm=TRUE));"))
+             )
+     )
+     
+# could make plots for each province:
+# plot_list = list()
+# for(var in 1:length(naics_census_vars)){
+#   variable = paste0('frac_in_DA_',naics_census_vars)[var]
+#   plot_list[[var]] = fraction_of_NAIC_in_DA %>% ggplot(aes_string(fill = variable)) +
+#                       geom_sf(aes(geometry = geometry), na.rm = TRUE) +
+#     theme(legend.position = "bottom") +
+#     #scale_fill_gradient(limits =c(0, 1))+ # common scaling is not useful here
+#     ggtitle(paste("Fraction of provincial\n",variable,"\nNAICS individuals in each census region"))
+#   
+# }
+# #note the use of aes_string to dynamically select the variable to plot
+# 
+# ggarrange(plotlist = plot_list, ncol=2)
+
+
+
+fraction_of_NAIC_in_DA  %>% 
+  mutate(provincename = provincename)%>% 
+  write_rds(file = paste0(location, '4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_NAIC_in_DA_',Province,'.rds'))
+                               
+
+# Most Economically important NAICS industry in the census DA (by population working in that sector)
+# It might be worth considering a few other demographic variables along the way.
+# For now we need the fraction of the people within a NAIC code within a census DA.
+# **Note that counts from within NAICS categories may not add up to the population despite 
+# all this coming from the same census.**  Some individuals might be in multiple NAICS codes or in no NAICS codes.
+### Start with finding the dominant NAICS category within the census region
+
+
+
+# Focus on key variables of interest
+fraction_of_DA_in_NAICS = census_data_ind %>% 
+                         filter(PR_UID == province_digits) %>% 
+                         select(Population, all_of(naics_census_vars), geometry, GeoUID, Region.Name) 
+# find the total NAICS count within a DA:
+
+eval(parse(text = paste("fraction_of_DA_in_NAICS = fraction_of_DA_in_NAICS %>% mutate(tot_naics=",paste(naics_census_vars,collapse="+"),")")))
+
+# find the fraction of the DA in a NAICS category:
+eval(parse(text = 
+             glue(paste0("fraction_of_DA_in_NAICS = fraction_of_DA_in_NAICS%>% mutate(",
+                  "frac_in_naics_{naics_census_vars}","= {naics_census_vars}/tot_naics);"))
+           )
+     )
+
+
+# Find the dominant NAICS category in a DA
+# We can't directly obtain the maximum over a set of columns when the geometries are attached because all operations are also attempted on the MULTIPOLYGON
+
+max_index = max.col(st_set_geometry(fraction_of_DA_in_NAICS[,naics_census_vars], NULL))
+
+fraction_of_DA_in_NAICS = fraction_of_DA_in_NAICS %>%
+  mutate(Dominant_NAICS = naics_census_vars[max_index])%>%
+  mutate(colourval = plyr::mapvalues(Dominant_NAICS, from = full_dict_new$census, to = full_dict_new$colours2use))
+
+
+# make a plot 
+# fraction_of_DA_in_NAICS %>% ggplot() +
+#                       geom_sf(aes(fill = Dominant_NAICS, geometry = geometry), na.rm = TRUE) +
+#     theme(legend.position = "bottom",legend.title = element_blank()) +
+#     ggtitle("Dominant NAICS category within in each census region")
+# 
+
+
+### Next plot the fraction of the census region that works in the NAICS category
+
+# could make plots for each province:
+# plot_list = list()
+# for(var in 1:length(unique(naics_census_vars))){
+#   variable = unique(naics_census_vars)[var]
+#   plot_list[[var]] = fraction_of_DA_in_NAICS %>% ggplot(aes_string(fill = variable)) +
+#                       geom_sf(aes(geometry = geometry), na.rm = TRUE) +
+#     theme(legend.position = "bottom") +
+#     #scale_fill_gradient(limits =c(0, 1))+ # common scaling is not useful here
+#     ggtitle(paste("Fraction of census DA in \n",variable))
+#   
+# }
+# #note the use of aes_string to dynamically select the variable to plot
+# 
+# ggarrange(plotlist = plot_list, ncol=2)
+
+  
+
+fraction_of_DA_in_NAICS  %>% 
+  mutate(provincename = provincename)%>% 
+  write_rds(file = paste0(location,'4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_DA_in_NAICS_',Province,'.rds'))
+
+}
+```
+
+
+
+# Similary construct the Canada-wide files
+
+
+```{r FracInNAIC_DA_canada, eval = FALSE}
+  
+fraction_of_DA_in_NAICS = NULL 
+fraction_of_NAIC_in_DA  = NULL
+for(Province in province_codings %>% pull(abv)){
+
+  fraction_of_DA_in_NAICS  = rbind(fraction_of_DA_in_NAICS, 
+                                            read_rds(file = paste0(location, '4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_DA_in_NAICS_',Province,'.rds'))%>% mutate(province = Province))
+  fraction_of_NAIC_in_DA   = rbind(fraction_of_NAIC_in_DA, 
+                                            read_rds(file = paste0(location, '4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_NAIC_in_DA_',Province,'.rds'))%>% mutate(province = Province))
+}
+
+
+fraction_of_DA_in_NAICS %>%
+                   write_rds(file = paste0(location, '4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_DA_in_NAICS_Canada.rds'))
+fraction_of_NAIC_in_DA  %>% 
+                   write_rds(file = paste0(location, '4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_NAIC_in_DA_Canada.rds'))
+
+
+
+
+```
+
+
+
+# Try some leaflet plots as this java library will allow better zoom functionality.
+
+```{r, eval = TRUE, include = FALSE}
+fraction_of_DA_in_NAICS = read_rds(file = paste0(location, '4.a_census_fraction_of_subdivision_data/4.a_census_fraction_of_DA_in_NAICS_Canada.rds'))
+
+```
+
+
+```{r FracInNAIC_DA_leaflet, cache = FALSE, eval = TRUE}
+data2use = fraction_of_DA_in_NAICS%>% filter(province=="PE")
+
+labels <- sprintf(
+  "<strong>%s</strong>",
+  as.character(data2use$Region.Name)
+) %>% lapply(htmltools::HTML)
+
+
+pal <- colorNumeric(
+  palette = "Reds",
+  domain = c(0,1))
+
+data2use %>% 
+  leaflet()%>%
+     addPolygons(fillColor = ~pal(frac_in_naics_X11.Agriculture.forestry.fishing.hunting.21.Mining.quarrying.and.oil.and.gas.extraction),
+                   weight = 2,
+                 fillOpacity = 1,
+                 highlightOptions = highlightOptions(
+    weight = 5,
+    bringToFront = TRUE),
+    label = labels,
+  labelOptions = labelOptions(
+    style = list("font-weight" = "normal", padding = "3px 8px"),
+    textsize = "15px",
+    direction = "auto"))
+     
+
+
+
+
+
+
+```
+
+
+
+

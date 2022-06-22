@@ -1,0 +1,98 @@
+---
+title: 'GDP and Total Hours Worked'
+author: "Dave Campbell"
+date: '2021-11-01'
+summary: 'Cansim data extraction'
+lastmod: '2022-09-06T16:34:12-04:00'
+---
+
+# Goals
+
+Extract **Total Hours Worked** in each NAICS sector at \{province, monthly, NAICS sector\} and **GDP** at both {provincial, annual, NAICS sector} and \{national, monthly, NAICS sector\}.  Ultimately want to use total hours worked to split the GDP per sector into shares for each province.
+
+# Limitations
+
+- **Management.of.companies.and.enterprises..55.** is missing before 2007.  May need imputing by growing it back by total GDP and/or considering growth of other variables.
+
+# Data Provider
+
+Statistics Canada hosts a large set of socio-economic [datasets](https://www150.statcan.gc.ca/n1//en/type/data?MM=1#tables). 
+
+
+# Basic libraries and R version
+
+```{R, message = FALSE, warning = FALSE}
+library(tidyverse) # for its nice flow.
+library(cansim) #for pulling Stat Can socioeconomic data
+library(lubridate) # for dealing with dates
+library(GGally) # for pairs plot
+library(ggpubr) # for putting a regression equation onto a ggplot figure
+library(glue)   # used for dynamic variable construction
+library(dplyr)  # for data manipulation
+
+# set up data location:
+location = "R:/res/wher/Google_Climate_Dataset/"
+```
+
+```{R version}
+version
+```
+
+  
+## Pulling the raw tables from the cansim library
+
+The **total hours wored** data table has 10 million rows and the **GDP** table has 1/4 milllion.  While we're at it, remake some column names to make them more R friendly and construct proper dates.
+
+
+```{R, message = FALSE, cache = TRUE, warning = FALSE, eval = FALSE}
+#Actual hours worked by industry, monthly, unadjusted for seasonality
+THW = get_cansim("14-10-0036-01") %>% rename_all(make.names) 
+
+#Actual hours worked by industry, monthly, adjusted for seasonality, national
+THWSA = get_cansim("14-10-0289-01") %>% rename_all(make.names) 
+
+#Employment by industry, monthly, unadjusted for seasonality
+EMP = get_cansim("14-10-0355-01") %>% rename_all(make.names) 
+
+#Gross domestic product (GDP) at basic prices, by industry, monthly (x 1,000,000)
+GDP       = get_cansim("36-10-0434-01") %>% rename_all(make.names) 
+
+#Gross domestic product (GDP) at basic prices, by industry, provinces and territories (x 1,000,000) annual
+GDPAnnual = get_cansim("36-10-0402-01") %>% rename_all(make.names) 
+
+#Gross domestic product (GDP) at factor cost in 1992 constant prices, by Standard Industrial Classification, 1980 (SIC), monthly (x 1,000,000)
+GDPsic = get_cansim("36-10-0377-01") %>% rename_all(make.names)
+
+```
+
+
+### Basic date cleanup
+
+```{R, cache = TRUE, eval = FALSE}
+THW = THW %>% 
+  # mutate(date = parse_date_time(REF_DATE, orders = "Y-m")) %>%# 4 digit year with 2 digit month. <-- already included
+  separate(REF_DATE, into = c("year","month"),sep = "-")
+
+THWSA = THWSA %>% 
+  # mutate(date = parse_date_time(REF_DATE, orders = "Y-m")) %>%# 4 digit year with 2 digit month. <-- already included
+  separate(REF_DATE, into = c("year","month"),sep = "-")
+
+EMP = EMP %>% 
+  # mutate(date = parse_date_time(REF_DATE, orders = "Y-m")) %>%# 4 digit year with 2 digit month. <-- already included
+  separate(REF_DATE, into = c("year","month"),sep = "-")
+
+GDP = GDP %>% 
+  # mutate(date = parse_date_time(REF_DATE, orders = "Y-m")) %>%# 4 digit year with 2 digit month.<-- already included
+  separate(REF_DATE, into = c("year","month"),sep = "-")
+
+#GDPAnnual = GDPAnnual %>% 
+  # mutate(date = parse_date_time(REF_DATE, orders = "Y-m")) %>%# 4 digit year with 2 digit month.<-- already included
+ # mutate(year= as.numeric(year)) - this seems to not do anything? 
+
+GDPsic = GDPsic %>% 
+  # mutate(date = parse_date_time(REF_DATE, orders = "Y-m")) %>%# 4 digit year with 2 digit month.<-- already included
+  separate(REF_DATE, into = c("year","month"),sep = "-")
+
+save.image("Total_hours_and_GDP.Rdata")
+
+```

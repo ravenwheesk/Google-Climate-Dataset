@@ -1,0 +1,540 @@
+---
+title: "2.b_GDP_THW_mapping"
+author: "Sandrine Njoo"
+date: "03/11/2021"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+This file maps the names of the GDP cariables to those in the Total Hours Worked data set.
+
+# Limitations:
+The THW and GDP variables are crafted in tile **1.c**, but the code is copied over.  Potentially this could be saved from **1.c** and then reloaded here if the list is expanded.
+
+
+
+## Creating a mapping from the LFS to Census data industries
+
+Loading the important libraries and noting the R version.
+
+
+
+```{r}
+
+version
+
+```
+
+
+
+```{r library, warning = FALSE, message = FALSE}
+#using R:
+
+library(tidyverse)  # data manipulation and piping
+library(data.table) # renaming columns in bulk using 'setnames'
+library(plyr)       # recoding factor levels using 'mapvalues' 
+library(lubridate)
+
+# set up data location:
+location = "R:/res/wher/Google_Climate_Dataset/"
+
+```
+
+# load data to match
+
+```{r, message = FALSE, warning = FALSE}
+
+THW_post1986 = read_csv(file = paste0(location,"1.c-Data_From_Cansim-total_hours_worked.csv"))
+THW_post1986 %>% glimpse
+GDP_post1996 = read_csv(file = paste0(location, "1.c-Data_From_Cansim-GDP.csv"))
+GDP_post1996 %>% glimpse
+GDP_pre1997= read_csv(file = paste0(location, "1.c-Data_From_Cansim-GDPretro.csv"))
+GDP_pre1997 %>% glimpse
+
+
+```
+
+
+## Creating a mapping from GDP to THW data
+First consider the THW and GDP variables crafted in tile **1.c**.  The code is copied over.  Potentially this could be saved from **1.c** and then reloaded here if the list is expanded.
+
+```{r}
+
+
+THW_ind_names = c(
+  "Utilities..22.",
+  "Construction..23.",
+  "Manufacturing..31.33.",
+  "Wholesale.and.retail.trade..41..44.45.",
+  "Transportation.and.warehousing..48.49.",
+  "Finance..insurance..real.estate..rental.and.leasing..52.53.",
+  "Professional..scientific.and.technical.services..54.", 
+  "Business..building.and.other.support.services..55.56.",
+  "Educational.services..61.",
+  "Health.care.and.social.assistance..62.",
+  "Information..culture.and.recreation..51..71.",               
+  "Accommodation.and.food.services..72.",
+  "Other.services..except.public.administration...81.",             
+  "Public.administration..91.",
+  "Agriculture..forestry..fishing.and.hunting..11.mining.21")
+
+
+GDP_ind_names = c("Utilities..22.",
+      "Construction..23.",                                      
+      "Manufacturing..31.33.",  
+      "Transportation.and.warehousing..48.49.", 
+      "Professional..scientific.and.technical.services..54.",
+      "Educational.services..61.",                      
+      "Health.care.and.social.assistance..62.",
+      "Accommodation.and.food.services..72.",
+      "Other.services..except.public.administration...81.",
+      "Public.administration..91.",
+      "Agriculture..forestry..fishing.and.hunting..11.mining.21",
+      "Wholesale.and.retail.trade..41..44.45.",
+      "Finance..insurance..real.estate..rental.and.leasing..52.53.", 
+      "Information..culture.and.recreation..51..71.")
+
+
+dict_thw_gdp <- data.frame(GDP_ind_names=NA, THW_ind_names=NA)[numeric(0), ]
+not_matched <- data.frame(not_found=NA)
+
+for (val in 1:length(GDP_ind_names)){
+  if(!identical(agrep(GDP_ind_names[[val]], THW_ind_names), integer(0))){
+    out_1 = GDP_ind_names[[val]]
+    out_2 = THW_ind_names[agrep(GDP_ind_names[[val]], THW_ind_names)]
+    if(length(out_2)<2){
+      dict_thw_gdp[val,1] <- out_1
+      dict_thw_gdp[val,2] <- out_2
+    }
+    else{
+      if(adist(GDP_ind_names[[val]],out_2[1])>adist(GDP_ind_names[[val]],out_2[2])){
+        dict_thw_gdp[val,1] <- out_1
+        dict_thw_gdp[val,2]<-out_2[2]
+      }
+      else{
+        dict_thw_gdp[val,2]<-out_2[1]
+      }
+      
+    }
+    
+  }
+  else if(identical(agrep(GDP_ind_names[[val]], THW_ind_names), integer(0))){
+    out = GDP_ind_names[[val]]
+    not_matched = rbind(not_matched, out)
+  }
+  
+}
+
+dict_thw_gdp <- dict_thw_gdp %>% drop_na()
+
+dict_thw_gdp[nrow(dict_thw_gdp) + 1,] = c("All.industries.ours","totals.hours.ours")
+```
+
+## Creating a mapping from GDP (1961-1997) to THW data
+
+```{r}
+
+
+THW_ind_names = c(
+  "Utilities..22.",
+  "Construction..23.",
+  "Manufacturing..31.33.",
+  "Wholesale.and.retail.trade..41..44.45.",
+  "Transportation.and.warehousing..48.49.",
+  "Finance..insurance..real.estate..rental.and.leasing..52.53.",
+  "Professional..scientific.and.technical.services..54.", 
+  "Business..building.and.other.support.services..55.56.",
+  "Educational.services..61.",
+  "Health.care.and.social.assistance..62.",
+  "Information..culture.and.recreation..51..71.",               
+  "Accommodation.and.food.services..72.",
+  "Other.services..except.public.administration...81.",             
+  "Public.administration..91.",
+  "Agriculture..forestry..fishing.and.hunting..11.mining.21")
+
+#For GDPsic_ind_names, changing names manually may be necessary for easier matching
+
+
+GDP_pre1997 = GDP_pre1997 %>%
+  mutate(Utilities..22. = Other.utility.industries)%>%
+  mutate(Construction..23. = Construction.industries)%>%
+  mutate(Manufacturing..31.33. = Manufacturing.industries)%>%
+  mutate(Finance..insurance..real.estate..rental.and.leasing..52.53. =
+Finance..insurance.and.real.estate.industries)%>%
+  mutate(Professional..scientific.and.technical.services..54. = Business.services.industries)%>%
+  mutate(Public.administration..91. = Government.service.industries)%>%
+  mutate(Educational.services..61. = Educational.service.industries)%>%
+  mutate(Health.care.and.social.assistance..62. = Health.and.social.service.industries)%>%
+  mutate(Accommodation.and.food.services..72. = Accommodation..food.and.beverage.service.industries)%>%
+  mutate(Other.services..except.public.administration...81. = Other.service.industries)
+
+  #
+  
+GDPsic_ind_names = c(
+  "Manufacturing..31.33.",
+  "Construction..23.",
+  "Utilities..22.",
+  "Finance..insurance..real.estate..rental.and.leasing..52.53.",
+  "Professional..scientific.and.technical.services..54.",
+  "Public.administration..91.",
+  "Educational.services..61.",
+  "Health.care.and.social.assistance..62.",
+  "Accommodation.and.food.services..72.",
+  "Other.services..except.public.administration...81.",
+  "Agriculture..forestry..fishing.and.hunting..11.mining.21",
+  "Wholesale.and.retail.trade..41..44.45.",
+  "Transportation.and.warehousing..48.49.",
+  "Information..culture.and.recreation..51..71.")
+
+
+dict_thw_gdpsic <- data.frame(GDPsic_ind_names=NA, THW_ind_names=NA)[numeric(0), ]
+not_matched <- data.frame(not_found=NA)
+
+for (val in 1:length(GDPsic_ind_names)){
+  if(!identical(agrep(GDPsic_ind_names[[val]], THW_ind_names), integer(0))){
+    out_1 = GDPsic_ind_names[[val]]
+    out_2 = THW_ind_names[agrep(GDPsic_ind_names[[val]], THW_ind_names)]
+    if(length(out_2)<2){
+      dict_thw_gdpsic[val,1] <- out_1
+      dict_thw_gdpsic[val,2] <- out_2
+    }
+    else{
+      if(adist(GDPsic_ind_names[[val]],out_2[1])>adist(GDPsic_ind_names[[val]],out_2[2])){
+        dict_thw_gdpsic[val,1] <- out_1
+        dict_thw_gdpsic[val,2]<-out_2[2]
+      }
+      else{
+        dict_thw_gdpsic[val,2]<-out_2[1]
+      }
+      
+    }
+    
+  }
+  else if(identical(agrep(GDPsic_ind_names[[val]], THW_ind_names), integer(0))){
+    out = GDPsic_ind_names[[val]]
+    not_matched = rbind(not_matched, out)
+  }
+  
+}
+
+dict_thw_gdpsic <- dict_thw_gdpsic %>% drop_na()
+
+dict_thw_gdpsic[nrow(dict_thw_gdpsic) + 1,] = c("All.industries.ours","totals.hours.ours")
+
+#note - gdpsic not fully mapping to thw - used to mutate to change them
+
+
+```
+
+# Joining the two dictionaries
+
+```{r}
+
+dict_thw_gdp_gdpsic <- inner_join(dict_thw_gdp, dict_thw_gdpsic)
+
+```
+
+# Examine dictionary mapping
+
+```{r}
+
+dict_thw_gdp_gdpsic
+
+```
+
+
+
+## Checking for failures:
+
+```{r}
+not_matched
+```
+
+## Save the output
+
+```{r}
+dict_thw_gdp_gdpsic %>% write_csv(file= paste0(location, "2.b_Industry_mapping_THW_Census_GDP_THW_GDPSIC.csv"))
+```
+
+# Use dictionary mapping to create GDP dataframes with identical columns - this section can be relocated
+
+```{r}
+
+naics_gdp_vars <- full_dict_new %>% pull(GDP_ind_names) %>% unique() 
+sic_gdp_vars <- full_dict_new %>% pull(GDPsic_ind_names) %>% unique() 
+
+new_GDP_post1996 <- GDP_post1996 %>% select(GEO, Date, all_of(naics_gdp_vars))
+new_GDP_pre1997 <- GDP_pre1997 %>% select(GEO, Date, all_of(sic_gdp_vars))
+
+
+
+```
+
+#now have identical table structure for GDP tables for 1961-
+#Next, create data frame that splices pre1997 GDP to post1996 GDP. Options include: (1) Create new table from GDP_post1996, extend range backward to 1976. Create new table from GDP_pre1997 that is the industry GDP growth rates. Use formula from excel table to splice each column by growth rate table. 
+
+```{r}
+
+
+#create variable for GDP growth rate for each industry:
+
+GDP_1976 <- new_GDP_pre1997 %>% filter(Date >= "1975-12-01" & Date <= "1997-01-01")
+
+
+GDP_1976 = GDP_1976 %>% 
+   arrange(Date) %>%
+mutate(Utilities_g=Utilities..22./lead(Utilities..22.),
+Construction_g=Construction..23./lead(Construction..23.), 
+Manufacturing_g=Manufacturing..31.33./lead(Manufacturing..31.33.), 
+Transportation_g=Transportation.and.warehousing..48.49./lead(Transportation.and.warehousing..48.49.),
+Professional_g=Professional..scientific.and.technical.services..54./lead(Professional..scientific.and.technical.services..54.),
+Educational_g=Educational.services..61./lead(Educational.services..61.),
+Health.care_g=Health.care.and.social.assistance..62./lead(Health.care.and.social.assistance..62.),
+Accommodation_g=Accommodation.and.food.services..72./lead(Accommodation.and.food.services..72.),
+Other.services_g=Other.services..except.public.administration...81./lead(Other.services..except.public.administration...81.),
+Public.administration_g=Public.administration..91./lead(Public.administration..91.),
+Agriculture_g=Agriculture..forestry..fishing.and.hunting..11.mining.21/lead(Agriculture..forestry..fishing.and.hunting..11.mining.21),
+Trade_g=Wholesale.and.retail.trade..41..44.45./lead(Wholesale.and.retail.trade..41..44.45.),
+Finance_g=Finance..insurance..real.estate..rental.and.leasing..52.53./lead(Finance..insurance..real.estate..rental.and.leasing..52.53.),
+Information_g=Information..culture.and.recreation..51..71./lead(Information..culture.and.recreation..51..71.))
+
+#note: there must be an easier way to write this with the lapply function
+
+
+#to bind this table to the post_1996 table, need matching columns, including growth rate columns:
+
+
+match_GDP_post1996 = new_GDP_post1996 %>% 
+   arrange(Date) %>%
+mutate(Utilities_g=Utilities..22./lead(Utilities..22.),
+Construction_g=Construction..23./lead(Construction..23.), 
+Manufacturing_g=Manufacturing..31.33./lead(Manufacturing..31.33.), 
+Transportation_g=Transportation.and.warehousing..48.49./lead(Transportation.and.warehousing..48.49.),
+Professional_g=Professional..scientific.and.technical.services..54./lead(Professional..scientific.and.technical.services..54.),
+Educational_g=Educational.services..61./lead(Educational.services..61.),
+Health.care_g=Health.care.and.social.assistance..62./lead(Health.care.and.social.assistance..62.),
+Accommodation_g=Accommodation.and.food.services..72./lead(Accommodation.and.food.services..72.),
+Other.services_g=Other.services..except.public.administration...81./lead(Other.services..except.public.administration...81.),
+Public.administration_g=Public.administration..91./lead(Public.administration..91.),
+Agriculture_g=Agriculture..forestry..fishing.and.hunting..11.mining.21/lead(Agriculture..forestry..fishing.and.hunting..11.mining.21),
+Trade_g=Wholesale.and.retail.trade..41..44.45./lead(Wholesale.and.retail.trade..41..44.45.),
+Finance_g=Finance..insurance..real.estate..rental.and.leasing..52.53./lead(Finance..insurance..real.estate..rental.and.leasing..52.53.),
+Information_g=Information..culture.and.recreation..51..71./lead(Information..culture.and.recreation..51..71.))
+
+
+
+GDP_1976 <- GDP_1976 %>% filter(Date >= "1976-01-01" & Date < "1997-01-01")
+GDP_total <- rbind(GDP_1976, match_GDP_post1996)
+
+
+
+#create full GDP table by splicing pre_1997 according to growth rate
+
+#now test on this table to match to excel sheet - repeat for all 14 variables. Then, create a final GDP_full table with only the 14 variables
+
+eval(parse(text=
+     # view the line of code generated by running with the glue command       
+             glue(paste0('GDP_wide %>%arrange(Date)%>% mutate(', paste(paste0(GDP.variables,"_","g","=",GDP.variables, "/", lead(GDP.variables),collapse=","),')')
+                        ))))
+
+# use glue to calculate productivity
+ eval(parse(text= glue("productivity_annual_avg = productivity_annual_avg %>% 
+mutate({paste('prod', {naics_thw_vars}, sep = '_')} = (as.numeric({paste0({naics_thw_vars},'.y')}) /(as.numeric({paste0({naics_thw_vars},'.x')})))*1000)")))
+ 
+ GDP_wide_test <- GDP_wide %>%
+ 
+ eval(parse(text= glue('GDP_wide = GDP_wide %>%arrange(Date)%>% mutate(, paste({paste("g", {GDP.variables}, sep= "_")} = (as.numeric({paste0({GDP.variables})})/(as.numeric({paste0(lead{GDP.variables})}')
+                        ))
+
+#Utilities:
+
+start     <- as.Date("96-12-01",format="%y-%m-%d")
+end   <- as.Date("76-01-01",format="%y-%m-%d")
+
+theDate <- start
+
+while (theDate >= end){
+  GDP_total = GDP_total %>% mutate(Utilities..22. = case_when( (Date < as.Date("1997-01-01")) ~ lead(Utilities..22.)*(Utilities_g),(Date >= as.Date("1997-01-01")) ~ Utilities..22.))
+  theDate <- theDate - 1}
+
+##Now for the rest of the columns - will do the brute force way for now, can clean up later
+
+#Construction:
+
+start     <- as.Date("96-12-01",format="%y-%m-%d")
+end   <- as.Date("76-01-01",format="%y-%m-%d")
+
+theDate <- start
+
+while (theDate >= end){
+  GDP_total = GDP_total %>% mutate(Construction..23. = case_when( (Date < as.Date("1997-01-01")) ~ lead(Construction..23.)*(Construction_g),(Date >= as.Date("1997-01-01")) ~ Construction..23.))
+  theDate <- theDate - 1}
+
+# Manufacturing:
+
+start     <- as.Date("96-12-01",format="%y-%m-%d")
+end   <- as.Date("76-01-01",format="%y-%m-%d")
+
+theDate <- start
+
+while (theDate >= end){
+  GDP_total = GDP_total %>% mutate(Manufacturing..31.33. = case_when( (Date < as.Date("1997-01-01")) ~ lead(Manufacturing..31.33.)*(Manufacturing_g),(Date >= as.Date("1997-01-01")) ~ Manufacturing..31.33.))
+  theDate <- theDate - 1}
+
+# Transportation and warehousing:
+
+start     <- as.Date("96-12-01",format="%y-%m-%d")
+end   <- as.Date("76-01-01",format="%y-%m-%d")
+
+theDate <- start
+
+
+while (theDate >= end){
+  GDP_total = GDP_total %>% mutate(Transportation.and.warehousing..48.49. = case_when( (Date < as.Date("1997-01-01")) ~ lead(Transportation.and.warehousing..48.49.)*(Transportation_g),(Date >= as.Date("1997-01-01")) ~ Transportation.and.warehousing..48.49.))
+  theDate <- theDate - 1}
+
+
+# Professional, scientific and technical services:
+
+start     <- as.Date("96-12-01",format="%y-%m-%d")
+end   <- as.Date("76-01-01",format="%y-%m-%d")
+
+theDate <- start
+
+while (theDate >= end){
+  GDP_total = GDP_total %>% mutate(Professional..scientific.and.technical.services..54. = case_when( (Date < as.Date("1997-01-01")) ~ lead(Professional..scientific.and.technical.services..54.)*(Professional_g),(Date >= as.Date("1997-01-01")) ~ Professional..scientific.and.technical.services..54.))
+  theDate <- theDate - 1}
+
+#Educational services
+
+start     <- as.Date("96-12-01",format="%y-%m-%d")
+end   <- as.Date("76-01-01",format="%y-%m-%d")
+
+theDate <- start
+
+
+while (theDate >= end){
+  GDP_total = GDP_total %>% mutate(Educational.services..61. = case_when( (Date < as.Date("1997-01-01")) ~ lead(Educational.services..61.)*(Educational_g),(Date >= as.Date("1997-01-01")) ~ Educational.services..61.))
+  theDate <- theDate - 1}
+
+# Health care and social assistance
+
+start     <- as.Date("96-12-01",format="%y-%m-%d")
+end   <- as.Date("76-01-01",format="%y-%m-%d")
+
+theDate <- start
+
+
+while (theDate >= end){
+  GDP_total = GDP_total %>% mutate(Health.care.and.social.assistance..62. = case_when( (Date < as.Date("1997-01-01")) ~ lead(Health.care.and.social.assistance..62.)*(Health.care_g),(Date >= as.Date("1997-01-01")) ~ Health.care.and.social.assistance..62.))
+  theDate <- theDate - 1}
+
+# Accommodation and food services
+
+start     <- as.Date("96-12-01",format="%y-%m-%d")
+end   <- as.Date("76-01-01",format="%y-%m-%d")
+
+theDate <- start
+
+
+while (theDate >= end){
+  GDP_total = GDP_total %>% mutate(Accommodation.and.food.services..72. = case_when( (Date < as.Date("1997-01-01")) ~ lead(Accommodation.and.food.services..72.)*(Accommodation_g),(Date >= as.Date("1997-01-01")) ~ Accommodation.and.food.services..72.))
+  theDate <- theDate - 1}
+
+# Other services
+
+start     <- as.Date("96-12-01",format="%y-%m-%d")
+end   <- as.Date("76-01-01",format="%y-%m-%d")
+
+theDate <- start
+
+while (theDate >= end){
+  GDP_total = GDP_total %>% mutate (Other.services..except.public.administration...81. = case_when( (Date < as.Date("1997-01-01")) ~ lead(Other.services..except.public.administration...81.)*(Other.services_g),(Date >= as.Date("1997-01-01")) ~ Other.services..except.public.administration...81.))
+  theDate <- theDate - 1} 
+
+#Public administration
+
+start     <- as.Date("96-12-01",format="%y-%m-%d")
+end   <- as.Date("76-01-01",format="%y-%m-%d")
+
+theDate <- start
+
+while (theDate >= end){
+  GDP_total = GDP_total %>% mutate (Public.administration..91. = case_when( (Date < as.Date("1997-01-01")) ~ lead(Public.administration..91.)*(Public.administration_g),(Date >= as.Date("1997-01-01")) ~ Public.administration..91.))
+  theDate <- theDate - 1} 
+
+#Agriculture, forestry, fishing, hunting and mining
+
+start     <- as.Date("96-12-01",format="%y-%m-%d")
+end   <- as.Date("76-01-01",format="%y-%m-%d")
+
+theDate <- start
+
+while (theDate >= end){
+  GDP_total = GDP_total %>% mutate (Agriculture..forestry..fishing.and.hunting..11.mining.21 = case_when( (Date < as.Date("1997-01-01")) ~ lead(Agriculture..forestry..fishing.and.hunting..11.mining.21)*(Agriculture_g),(Date >= as.Date("1997-01-01")) ~ Agriculture..forestry..fishing.and.hunting..11.mining.21))
+  theDate <- theDate - 1} 
+
+# Wholesale and retail trade
+
+start     <- as.Date("96-12-01",format="%y-%m-%d")
+end   <- as.Date("76-01-01",format="%y-%m-%d")
+
+theDate <- start
+
+while (theDate >= end){
+  GDP_total = GDP_total %>% mutate (Wholesale.and.retail.trade..41..44.45. = case_when( (Date < as.Date("1997-01-01")) ~ lead(Wholesale.and.retail.trade..41..44.45.)*(Trade_g),(Date >= as.Date("1997-01-01")) ~ Wholesale.and.retail.trade..41..44.45.))
+  theDate <- theDate - 1} 
+
+#Finance and insurance
+
+start     <- as.Date("96-12-01",format="%y-%m-%d")
+end   <- as.Date("76-01-01",format="%y-%m-%d")
+
+theDate <- start
+
+while (theDate >= end){
+  GDP_total = GDP_total %>% mutate (Finance..insurance..real.estate..rental.and.leasing..52.53. = case_when( (Date < as.Date("1997-01-01")) ~ lead(Finance..insurance..real.estate..rental.and.leasing..52.53.)*(Finance_g),(Date >= as.Date("1997-01-01")) ~ Finance..insurance..real.estate..rental.and.leasing..52.53.))
+  theDate <- theDate - 1} 
+
+# Information, culture and recreation
+
+start     <- as.Date("96-12-01",format="%y-%m-%d")
+end   <- as.Date("76-01-01",format="%y-%m-%d")
+
+theDate <- start
+
+while (theDate >= end){
+  GDP_total = GDP_total %>% mutate (Information..culture.and.recreation..51..71. = case_when( (Date < as.Date("1997-01-01")) ~ lead(Information..culture.and.recreation..51..71.)*(Information_g),(Date >= as.Date("1997-01-01")) ~ Information..culture.and.recreation..51..71.))
+  theDate <- theDate - 1} 
+
+
+
+
+```
+
+# All columns are now matched. A final table can be made dropping the growth rate variables and 
+```{r}
+eval(parse(text=
+     # view the line of code generated by running with the glue command        
+             glue(paste0("GDP_full = GDP_total %>%  mutate(All.industries.ours = ", paste({GDP_ind_names},collapse='+'),")"))
+           )
+     )
+
+GDP_full <- GDP_full %>% select(-contains("_g"))
+      
+```
+
+
+
+
+## Save the modified data set:
+```{r}
+
+GDP_full      %>% write_csv(file = paste0(location,"2.d-Data_From_Cansim-final_gdp.csv"))
+
+```

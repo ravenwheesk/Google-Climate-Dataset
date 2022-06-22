@@ -1,0 +1,103 @@
+---
+title: "2.c_Industry_mapping_LFS_Census_GDP_THW"
+author: "Sandrine Njoo"
+date: "03/11/2021"
+output: html_document
+---
+
+This file defines the mapping from the LFS NAICS coded variables to those from the census GDP and the Total Hours Worked datasets.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{R, message = FALSE, warning = FALSE}
+library(tidyverse) # for its nice flow.
+library(cansim) #for pulling Stat Can socioeconomic data
+library(lubridate) # for dealing with dates
+library(GGally) # for pairs plot
+library(ggpubr) # for putting a regression equation onto a ggplot figure
+library(glue)   # used for dynamic variable construction
+library(stringr)
+library(RColorBrewer) # for colours
+
+# set up data location:
+location = "C:/Users/wher/OneDrive - Bank of Canada/MyDocs/git"
+```
+
+
+```{r}
+
+version
+```
+
+
+
+
+
+## Creating a mapping between all 4 datasets
+
+
+
+We already have a mapping between LFS and Census and between THW and GDP from files **2.1** and **2.b**
+```{r, message = FALSE, warning = FALSE}
+
+dict_new     = read_csv(file = paste0(location, "2.a-LFT_to_census_dictionary.csv"))
+
+dict_thw_gdp = read_csv(file = paste0(location, "2.b_Industry_mapping_THW_Census_GDP_THW.csv"))
+
+```
+
+
+First, we'll extract the NAICS code (2 digit integer) to then combine our two dict_newionaries together. 
+
+
+
+```{r}
+# find the naics code numbers:
+dict_new = dict_new %>% mutate(naics =  str_replace_all(census,pattern = "[^\\d]+", replacement = "_"))
+# remove introduced leading or tailing punctuation:
+dict_new = dict_new %>% mutate(naics =  str_replace_all(naics,pattern = "(^_)|(_$)", replacement = ""))
+
+# find the naics code numbers:
+dict_thw_gdp = dict_thw_gdp %>% mutate(naics =  str_replace_all(THW_ind_names,pattern = "[^\\d]+", replacement = "_"))
+# remove introduced leading or tailing punctuation:
+dict_thw_gdp = dict_thw_gdp %>% mutate(naics =  str_replace_all(naics,pattern = "(^_)|(_$)", replacement = ""))
+
+```
+
+# Merge the two dictionaries based on the NAICS codes
+
+Note that some mappings are many to one since some NAICS industries have been merged together.  
+
+```{r}
+full_dict_new <- dict_thw_gdp%>% inner_join(dict_new, by = "naics")
+
+```
+
+
+# Colour mapping
+At this time it is convenient to tie in a column of colours to each variable to keep them consistent across all plots later on.
+```{r}
+#define the mapping
+names2use = unique(full_dict_new$GDP_ind_names)
+# include some extras in case more values are added later
+color2use = unique(c(brewer.pal(n=7,name = "Set1"),
+                     brewer.pal(n=8, name = "Set2"),
+                     brewer.pal(n=8, name = "Set3")))[1:length(names2use)]
+
+
+# set up one colour per merged NAICS code
+full_dict_new <- full_dict_new %>% 
+ mutate(colours2use = plyr::mapvalues(GDP_ind_names,   from = names2use,      to = color2use))
+
+
+full_dict_new %>% glimpse
+```
+
+Created the full dict_newionary for the 4 datasets
+```{r}
+full_dict_new %>% write_csv( file = paste0(location, '2.c_full_dict_mapping_THW_GDP_LFS_Census.csv'))
+# previously saved as read.csv( 'full_dict_new.csv')
+```

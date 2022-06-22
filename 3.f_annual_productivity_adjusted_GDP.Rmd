@@ -1,0 +1,418 @@
+---
+title: "3.f Data Quality Checks: Annual Productivity and Adjusted GDP"
+author: "Sandrine Njoo & Dave Campbell"
+date: "6/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Goal
+This file  compares our calculations with those from StatCan.  Differences and relative differences are compared.
+
+# Set up the work environment
+
+```{r}
+version
+```
+
+load libraries
+```{R, message = FALSE, warning = FALSE}
+library(tidyverse) # for its nice flow.
+library(lubridate) # for dealing with dates
+library(GGally) # for pairs plot
+library(ggpubr) # for arranging ggplot figures
+library(glue)   # used for dynamic variable construction
+library(stringr)
+library(dygraphs)
+library(xts)
+library(ggplot2)
+library(reshape2)
+# set up data location:
+location = "R:/mfa/data_sci_div/Google Climate Project/"
+```
+
+
+
+# Data loading
+
+Load and examine the data that will be used.  Note the differences in time range and geographies.  Information from Territories is not available.
+
+
+```{r, message = FALSE, warning = FALSE}
+
+# adjusted productivity per {province, month, NAICS}
+productivity_adjusted_GDP_post2007    <- read_csv( paste0(location, "3.e_productivity_adjusted_GDP_post2007.csv"))
+# productivity_adjusted_GDP_post2007_old    <- read_csv( paste0(location, "3.e-productivity_adjusted_GDP_post2007_deprecated.csv"))
+#Add in a variable for year:
+productivity_adjusted_GDP_post2007 = productivity_adjusted_GDP_post2007 %>% mutate(year = year(Date))
+# look at the data
+productivity_adjusted_GDP_post2007 %>% pull(Date)%>% range
+productivity_adjusted_GDP_post2007 %>% pull(GEO)%>% unique
+# productivity_adjusted_GDP_post2007 %>% glimpse
+
+
+# total GDP per {province, month, NAICS}
+GDP_Totals_annual_provincial_by_NAICS <- read_csv( paste0(location, "3.c-GDP_Totals_annual_provincial_by_NAICS.csv"))
+GDP_Totals_annual_provincial_by_NAICS %>% pull(Date)%>% range
+GDP_Totals_annual_provincial_by_NAICS %>% pull(GEO)%>% unique
+# GDP_Totals_annual_provincial_by_NAICS %>% glimpse
+
+# dictionary for converting NAICS code names across data types:
+full_dict_new <- read_csv( paste0(location, "2.c_full_dict_mapping_THW_GDP_LFS_Census.csv"))
+naics_gdp_vars = unique(full_dict_new$GDP_ind_names)
+
+```
+
+
+Obtain a single annual production value based on the average of the monthly estimates of the annual value for each province and NAICS.  Sum over all industries for a given location to obtain the total productivity (**total.all.industries**) in the province.
+
+```{r}
+
+average_annual_production <- productivity_adjusted_GDP_post2007 %>% 
+  group_by(year, GEO)%>% 
+  summarize(across(starts_with("adjusted_"), mean)) %>% 
+  ungroup %>%
+  rowwise()%>%
+  mutate(total.all.industries = sum(c_across(starts_with("adjusted_"))))
+
+
+```
+
+# Compare our results with the original gdp data 
+
+**All.industries.ours** comes from file **1.c** where we sum over the NAICS industries of interest. This value is slightly different from the original **All.industries..T001.** that was also obtained from file **1.c** becuase of very small differences in NAICS industries that were counted.
+
+```{r}
+# extract the original GDP data
+new_gdp_total_post2007 <- GDP_Totals_annual_provincial_by_NAICS%>% 
+  select(GEO, Date, all_of(naics_gdp_vars),All.industries.ours)%>% #  here we could have selected "All.industries..T001."
+  mutate(year = year(Date))
+
+
+```
+
+The variable **total.all.industries** is considered the original GDP estimate and **All.industries.ours** is our own estimate after first converting to production and subdividing into smaller shares then re-combining.
+
+The residual difference (original - ours) and the relative residual as a fraction of the original is obtained.
+```{r}
+
+comparison =  average_annual_production %>% select(GEO,year, total.all.industries) %>% 
+   inner_join(new_gdp_total_post2007    %>% select(GEO, year, All.industries.ours), by = c("GEO","year")) %>%
+  mutate(difference   = total.all.industries - All.industries.ours,
+         relative_res = difference / total.all.industries)
+
+```
+
+```{r}
+comparison %>% pivot_longer(cols = c(total.all.industries,All.industries.ours), names_to = "Type", values_to = "Totals") %>% 
+  ggplot(aes(x = year,colour = GEO)) +
+  geom_line(aes(y = Totals))+
+  facet_wrap(~Type) 
+
+```
+
+
+```{r}
+ggplot(comparison,                          
+       aes(x = total.all.industries,
+           y = All.industries.ours,
+           color = GEO)) +
+  geom_line()+
+  theme_minimal() 
+```
+
+
+
+```{r}
+ggplot(comparison,                          
+       aes(x = year,
+           y = relative_res,
+           color = GEO)) +
+  geom_line()+
+  theme_minimal() 
+```
+
+
+
+```{r}
+ggplot() + 
+  geom_line(data = comparison, aes(x = year, y = total.all.industries, color = GEO)) +
+  geom_line(data = comparison, aes(x = year, y = All.industries.ours, color = GEO))
+```
+
+
+# Within each province
+
+```{r}
+
+plot_holder = list()
+for( prov_index in 1:10){
+province  =  unique(comparison %>%pull(GEO))[prov_index]
+  plot_holder[[province]] = comparison %>% filter(GEO==province) %>%
+      ggplot() + 
+        geom_line( aes(x = year, y = total.all.industries)) +
+        geom_line( aes(x = year, y = All.industries.ours))
+}
+
+ggarrange(plotlist = plot_holder, ncol = 5, nrow=2)
+
+```
+
+# Relative residual histograms for the totals across all industries
+
+```{r}
+
+plot_holder = list()
+for(prov_index in 1:10){
+province  =  unique(comparison %>%pull(GEO))[prov_index]
+  plot_holder[[province]] = comparison %>% filter(GEO==province) %>%
+      ggplot() + 
+        geom_histogram( aes(x = relative_res), bins = 10) +
+    ggtitle(province)+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+}
+
+ggarrange(plotlist = plot_holder, ncol = 5, nrow=2)
+
+
+
+```
+Produce the residuals and relative redsiduals for each variable.  Use **glue** to make sure that all code is appropriately repeated for each variable.
+```{r}
+sector_comparison <- inner_join(new_gdp_total_post2007, productivity_adjusted_GDP_post2007, by = c("GEO", 'Date', 'year'))
+
+eval(parse(text= 
+  glue("sector_comparison = sector_comparison %>% 
+  mutate({paste0('diff_', {naics_gdp_vars})} = {naics_gdp_vars} - {paste0('adjusted_',{naics_gdp_vars})})%>%
+  mutate({paste0('relative_diff_', {naics_gdp_vars})} = {paste0('diff_', {naics_gdp_vars})}/{naics_gdp_vars})")
+))
+
+
+```
+
+# Search for outliers within specific industries
+
+Outliers are coloquially defined as values that are more than 1.5 * Inter-quartile range beyond the first or third quartiles.  To find outliers, we find the first and third quartiles, Q1 and Q3 respectively and produce a binary indicator for a particular value.  This kind of outlier detection is only appropriate on detrended data, so here that means we are only interested in finding outliers in the difference between our reconstructed values and the Stat Can values.  Again, use **glue** to make sure that the tools are applied to each variable.
+
+```{r}
+# use glue to produce the quartiles and detect outliers for all variables.
+eval(parse(text= 
+  glue("sector_comparison = sector_comparison %>% 
+  mutate({paste0('Q1_diff_', {naics_gdp_vars})} = quantile({paste0('diff_', {naics_gdp_vars})},.25),
+         {paste0('Q3_diff_', {naics_gdp_vars})} = quantile({paste0('diff_', {naics_gdp_vars})},.75),
+         {paste0('IQR_diff_', {naics_gdp_vars})} = {paste0('Q3_diff_', {naics_gdp_vars})}-{paste0('Q1_diff_', {naics_gdp_vars})},
+         {paste0('outlier_ind_diff_', {naics_gdp_vars})} = {paste0('diff_', {naics_gdp_vars})}>{paste0('Q3_diff_', {naics_gdp_vars})}+1.5*{paste0('IQR_diff_', {naics_gdp_vars})}|{paste0('diff_', {naics_gdp_vars})}<{paste0('Q1_diff_', {naics_gdp_vars})}-1.5*{paste0('IQR_diff_', {naics_gdp_vars})})")
+))
+
+```
+
+Make plots of the differenced values and highlight the outlier points.  Start by reshaping the data to make it easier to plot.  Since we are only interested in the residual difference, the relative residual, and the indicator for the outlier, we reshape the dataframe three times, in each case keep the locaion, Date, and the sector.  In one reshaping, keep the outlier indicator, in another only keep the residual value, in the third only keeps the relative residual value.  These are alljoined to align them by location, Date, and sector.  The resulting long (tall) data frame will make plotting easier.  
+
+
+
+```{r}
+
+
+# make two longer tibbles, extract the sector from an induced variable, then merge by {GEO,Date, year, sector}
+sector_comparison_for_ggplot = 
+  sector_comparison %>% 
+    select(GEO,Date, year, starts_with("diff_"))%>%
+    pivot_longer(starts_with("diff_"),              names_to="NAICS_residual", values_to = "Residual_diff")%>%
+  mutate(sector = str_replace_all(NAICS_residual, pattern = "diff_", replacement = ""))%>% 
+inner_join(
+  sector_comparison %>% 
+    select(GEO,Date, year, starts_with("outlier_ind_diff_"))%>%
+    pivot_longer(starts_with("outlier_ind_diff_"),  names_to="NAICS_outlier", values_to = "outlier_indicator")%>%
+  mutate(sector = str_replace_all(NAICS_outlier, pattern = "outlier_ind_diff_", replacement = "")),
+by = c("GEO", "Date", "sector"))%>% 
+inner_join(
+  sector_comparison %>% 
+    select(GEO,Date, year, starts_with("relative_diff_"))%>%
+    pivot_longer(starts_with("relative_diff_"),  names_to="NAICS_rel_residual", values_to = "Rel_Residual_diff")%>%
+  mutate(sector = str_replace_all(NAICS_rel_residual, pattern = "relative_diff_", replacement = "")),
+by = c("GEO", "Date", "sector"))
+
+
+
+sector_comparison_for_ggplot %>% glimpse
+```
+
+# Histograms of residuals.
+
+```{r}
+
+
+# for(prov_index in 1:10){
+prov_index = 1
+  province  =  unique(sector_comparison %>%pull(GEO))[prov_index]
+  sector_comparison_for_ggplot%>% 
+    filter(GEO==province) %>%
+    ggplot()+
+    geom_histogram(aes(x = Residual_diff))+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+    facet_wrap(~sector)+
+    ggtitle(province)
+# }    
+ 
+```
+
+
+# Histograms of relative residuals.
+
+```{r}
+
+
+# for(prov_index in 1:10){
+prov_index = 1
+  province  =  unique(sector_comparison %>%pull(GEO))[prov_index]
+  sector_comparison_for_ggplot%>% 
+    filter(GEO==province) %>%
+    ggplot()+
+    geom_histogram(aes(x = Rel_Residual_diff))+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+    facet_wrap(~sector)+
+    ggtitle(province)
+# }    
+ 
+```
+
+
+# Sector plots for provinces
+Relative differences with lines at $\pm 10\%$ and highlighted outliers.
+
+```{r}
+
+# for(prov_index in 1:10){
+prov_index = 1
+  province  =  unique(sector_comparison %>%pull(GEO))[prov_index]
+  sector_comparison_for_ggplot%>% 
+    mutate(outlier_indicator = ifelse(outlier_indicator, "yes","no"))%>%
+    filter(GEO==province) %>%
+    ggplot()+
+    geom_hline(yintercept = 0, alpha = .5, size = 1.5)+
+    geom_hline(yintercept = c(-.1,.1),colour = "orange",alpha = .5, size = 1.5)+
+    geom_point(aes(x = Date, y = Rel_Residual_diff, colour= outlier_indicator))+
+    geom_line(aes(x = Date, y = Rel_Residual_diff))+
+    scale_color_manual(values = c("yes" = "#FF0018", "no" = "#0000F9"))+
+    facet_wrap(~sector)+
+    ggtitle(province)
+# }    
+ 
+```
+
+
+# Calculate dymanic growth rate and percent rate
+For each NAICS variable using the original GDP calues.
+
+
+```{r}
+
+
+growth_rate <- sector_comparison
+eval(parse(text= glue("growth_rate = growth_rate %>% group_by(GEO)%>% arrange(year)  %>% do(mutate(.,Diff_year = year - lag(year),
+                        {paste0({naics_gdp_vars}, '_level_rate')} = as.numeric({naics_gdp_vars}) - lag(as.numeric({naics_gdp_vars})),
+                        {paste0({naics_gdp_vars}, '_growth_rate')}= as.numeric({paste0({naics_gdp_vars}, '_level_rate')})/lag({naics_gdp_vars})))")))
+
+growth_rate %>% ungroup()
+```
+
+Plot for the growth rate from stats can vs our, for Ontario 
+```{r}
+
+growth_rate_on <- growth_rate%>% filter(GEO=='Ontario')
+plot_holder = list()
+i=0
+for (var_name in naics_gdp_vars){
+  i=i+1
+  plot_holder[[i]] = ggplot() + 
+  geom_line(data=growth_rate_on , aes_string(x ="Date", y =  var_name)) +
+  geom_line(data=growth_rate_on, aes_string(x = "Date", y =paste0('adjusted_', var_name)), color = "red")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  
+}
+
+ggarrange(plotlist = plot_holder, ncol = 5, nrow=3)
+
+```
+Plot for the percent rate for stats can vs our data
+```{r}
+plot_holder = list()
+i=0
+for (var_name in naics_gdp_vars){
+  i=i+1
+  plot_holder[[i]] = ggplot() + 
+  geom_line(data=growth_rate_on , aes_string(x ="Date", y =  var_name)) +
+  geom_line(data=growth_rate_on, aes_string(x = "Date", y =paste0('adjusted_', var_name)), color = "red")
+}
+
+ggarrange(plotlist = plot_holder, ncol = 5, nrow=3)
+```
+
+```{r}
+#remove the columns that do now have level or growth rate
+percent_rate <- growth_rate %>%  select(GEO, Date, year, all_of(naics_gdp_vars),ends_with('_rate'),starts_with('adjusted_'))
+
+eval(parse(text= 
+glue("percent_rate = percent_rate %>% 
+mutate({paste0({naics_gdp_vars}, '_squarred_diff')} = ({naics_gdp_vars} - {paste0('adjusted_', {naics_gdp_vars})})^2)")
+))
+
+
+```
+
+
+# OLD CODE
+Unadjusted (mostly).
+```{r}
+mse_df <- percent_rate %>% select(-contains("level_rate"))
+mse_df_ab <- mse_df %>% filter(GEO=="Alberta")
+mse_df_bc<- mse_df %>% filter(GEO=="British Columbia")
+mse_df_mb<- mse_df %>% filter(GEO=="Manitoba")
+mse_df_nb<- mse_df %>% filter(GEO=="New Brunswick")
+mse_df_nl<- mse_df %>% filter(GEO=="Newfoundland and Labrador")
+mse_df_ns<- mse_df %>% filter(GEO=="Nova Scotia")
+mse_df_on<- mse_df %>% filter(GEO=="Ontario")
+mse_df_pei<- mse_df %>% filter(GEO=="Prince Edward Island")
+mse_df_qc<- mse_df %>% filter(GEO=="Quebec")
+mse_df_sk<- mse_df %>% filter(GEO=="Saskatchewan")
+```
+
+
+# This needs improving and efficiency:
+```{r}
+dfs <- list(mse_df_ab, mse_df_bc, mse_df_mb,mse_df_nb, mse_df_nl, mse_df_ns, mse_df_on, mse_df_pei, mse_df_qc, mse_df_sk)
+mse_all_prov <<- data.frame(matrix(ncol = 5, nrow = 0))
+x <- c("GEO","industry", "MSE", "SD", "value")
+colnames(mse_all_prov) <- x
+mse_all <- data.frame(matrix(ncol = 5, nrow = 0))
+colnames(mse_all) <-x
+
+for(i in 1:length(dfs)){
+  for (var_name in naics_gdp_vars){
+    df <- dfs[[i]]
+    mse_all_prov[i,1] <- unique(df$GEO)
+    mse_all_prov[i,2] <- var_name
+   mse_all_prov[i,3]<- mean(as.double(unlist(df[paste0(var_name,'_squarred_diff')])), na.rm =  TRUE)
+  mse_all_prov[i,5] <- sqrt(mean(as.double(unlist(df[paste0(var_name,'_squarred_diff')])), na.rm =  TRUE))/sd(as.double(unlist(df[var_name])), na.rm = TRUE)
+  mse_all_prov[i,4] <- sd(as.double(unlist(df[var_name])), na.rm = TRUE)
+  mse_all <- rbind(mse_all, mse_all_prov)
+  }
+}
+mse_all <- mse_all %>% distinct()
+```
+
+```{r}
+
+hist(mse_all$value)
+
+```
+
+```{r}
+
+ggplot(mse_all,aes(x = value, color = GEO)) + geom_histogram() 
+
+```

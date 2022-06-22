@@ -1,0 +1,131 @@
+---
+title: "3.b Dividing monthly GDP into provincial share by NAICS code"
+author: "Sandrine Njoo"
+date: "04/11/2021"
+output: html_document
+---
+
+Take national GDP by NAICS industry and split it into provincial amounts based on total hours worked within a province.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Set up the environment
+```{R}
+version
+```
+
+
+Load libraries.
+```{R, message = FALSE, warning = FALSE}
+library(tidyverse) # for its nice flow.
+library(cansim) #for pulling Stat Can socioeconomic data
+library(lubridate) # for dealing with dates
+library(GGally) # for pairs plot
+library(ggpubr) # for putting a regression equation onto a ggplot figure
+library(glue)   # used for dynamic variable construction
+library(stringr)
+
+# set up data location:
+location = "R:/res/wher/Google_Climate_Dataset/"
+```
+
+Read relevant CSVs
+```{r, message = FALSE}
+full_dict_new <- read_csv(paste0(location, "2.c_full_dict_mapping_THW_GDP_LFS_Census.csv"))
+THW_post2007  <- read_csv(paste0(location, "1.c-Data_From_Cansim-total_hours_worked.csv"))
+GDP_post2007  <- read_csv(paste0(location, "1.c-Data_From_Cansim-GDP.csv"))
+```
+
+Remove the columns we don't want (for example Agriculture, forestry etc since we already have agriculutre and mining together). We get a subset of the dataframes
+```{r}
+naics_gdp_vars <- full_dict_new %>% filter(naics !=  "N/A" )%>% pull(GDP_ind_names) %>% unique() 
+naics_thw_vars <- full_dict_new %>% filter(naics !=  "N/A" )%>% pull(THW_ind_names) %>% unique() 
+
+new_THW_post2007 <- THW_post2007 %>% select(GEO, Date, all_of(naics_gdp_vars))
+new_gdp_post2007 <- GDP_post2007 %>% select(GEO, Date, all_of(naics_thw_vars))
+
+```
+
+
+
+Deal with missing values in the  Agriculutre and utilities columns by subtracting the Canadian total from the sum of the values within other provinces for a given date.  In all cases there is at most one missing value per row.
+
+```{r}
+#new_THW_post2007_prov[which(is.na(new_THW_post2007_prov), arr.ind=TRUE)]
+
+new_THW_post2007 <- new_THW_post2007 %>% 
+  group_by(Date) %>% 
+  mutate(Agriculture..forestry..fishing.and.hunting..11.mining.21 = 
+           ifelse (is.na(Agriculture..forestry..fishing.and.hunting..11.mining.21), abs(-2*max(Agriculture..forestry..fishing.and.hunting..11.mining.21,na.rm=TRUE)+ sum(Agriculture..forestry..fishing.and.hunting..11.mining.21,na.rm=TRUE)),
+                   Agriculture..forestry..fishing.and.hunting..11.mining.21 )) %>%
+  mutate(Utilities..22. = ifelse (is.na(Utilities..22.), 
+                                  abs(-2*max(Utilities..22.,na.rm=TRUE)+sum(Utilities..22.,na.rm=TRUE)),
+                                  Utilities..22. ))%>%
+  ungroup()
+
+# The sum includes the Canadian total.  Remove Canada from the sum (it's the maximum).  
+# Then take [Canada - sum of others] as the point estimate.
+
+```
+
+We add a new column with the total hours across all sectors for a given location.  There should no longer be any NA values.
+
+```{r}
+new_THW_post2007 = new_THW_post2007 %>% 
+                 mutate(totals.hours.ours = rowSums(new_THW_post2007%>% select(-GEO, -Date)))
+```
+
+We remove the rows with Canada and we get the ratio of hours worked in each province per sector
+
+```{r}
+scale2 <- function(x){x/sum(x)}
+
+
+new_THW_post2007 <-   new_THW_post2007 %>% 
+                          filter(GEO !="Canada") %>%
+                          group_by(Date) %>% 
+                          mutate(across(all_of(naics_thw_vars),scale2))%>%# all our NAICS encoded variables end with numbers
+                          ungroup()
+
+```
+
+We multiply each ratio by the corresponding gdp per month per sector, by iterating through the dates and through the sectors.
+
+First merge the national and provincial datasets based on Date.  This copies rows of national information into each province.  Then take products of the provincial share and the national amount.
+
+```{r, echo = TRUE, eval = TRUE}
+
+# merge the two data sets to make multiplying easier at a fixed date
+# This also ensures the all the dates align:
+Merged_gdp_thw = new_gdp_post2007%>% select(-GEO) %>% inner_join(new_THW_post2007, by = "Date")
+# define a placeholder:
+new_THW_split = Merged_gdp_thw%>% select(GEO, Date, totals.hours.ours) # just keep the location, date, and total hours
+
+# use glue to match the NAICS variables
+# populate the NAICS variable columns:
+eval(parse(text =
+             glue(paste0("new_THW_split = new_THW_split %>% mutate({naics_thw_vars} = Merged_gdp_thw${naics_thw_vars}",".x*Merged_gdp_thw${naics_thw_vars}",".y)"))
+          )
+     )
+
+
+
+```
+
+
+## Take a look
+
+
+
+
+```{r}
+new_THW_split%>% glimpse
+```
+# Save output
+ 
+```{r}
+new_THW_split %>% write_csv(file = paste0(location, '3.b_GDP_contribution_per_NAICS_province_post2007.csv'))
+# formerly known as: "THW_GDP_post2007.csv"
+
+```
