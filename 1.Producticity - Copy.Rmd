@@ -1,0 +1,116 @@
+---
+title: "1.d-Data_from_cansim_hours"
+author: "Raven Wheesk"
+date: "6/17/2022"
+output: html_document
+---
+
+# Data Provider
+
+Statistics Canada hosts a large set of socio-economic [datasets](https://www150.statcan.gc.ca/n1//en/type/data?MM=1#tables). 
+
+
+# Basic libraries and R version
+
+```{R, message = FALSE, warning = FALSE}
+library(tidyverse) # for its nice flow.
+library(cansim) #for pulling Stat Can socioeconomic data
+library(lubridate) # for dealing with dates
+library(GGally) # for pairs plot
+library(ggpubr) # for putting a regression equation onto a ggplot figure
+library(glue)   # used for dynamic variable construction
+library(dplyr)  # for data manipulation
+
+# set up data location:
+location = "R:/res/wher/Google_Climate_Dataset/"
+```
+
+```{R version}
+version
+```
+
+# Loading data
+```{r loaddata, echo = FALSE}
+# loading from here to avoid re-downloading
+#load("Total_hours_and_GDP.Rdata")
+load("1.LFS.Rdata")
+load("1.GDP.Rdata")
+```
+
+```{r}
+GDP.variables = c("Utilities..22.",
+      "Construction..23.",                                  
+      "Manufacturing..31.33.",  
+      "Transportation.and.warehousing..48.49.", 
+      "Educational.services..61.",                      
+      "Health.care.and.social.assistance..62.",
+      "Accommodation.and.food.services..72.",
+      "Other.services..except.public.administration...81.",
+      "Public.administration..91.",
+      "Agriculture..forestry..fishing.and.hunting..11.mining.21",
+      "Wholesale.and.retail.trade..41..44.45.",
+      "Finance..insurance..real.estate..rental.and.leasing..52.53.",
+      "Professional..scientific.and.technical.services..54.", 
+      "Information..culture.and.recreation..51..71.")
+
+test = c("Utilities..22.", "Construction..23.", "Manufacturing..31.33.",    "Transportation.and.warehousing..48.49.", "Educational.services..61.", "Health.care.and.social.assistance..62.","Accommodation.and.food.services..72.", "Other.services..except.public.administration...81.", "Public.administration..91.", "Agriculture..forestry..fishing.and.hunting..11.mining.21", "Wholesale.and.retail.trade..41..44.45.", "Finance..insurance..real.estate..rental.and.leasing..52.53.", "Professional..scientific.and.technical.services..54.",  "Information..culture.and.recreation..51..71.","All.industries.ours")
+
+foo = c("Utilities..22.", "Construction..23.", "Manufacturing..31.33.",    "Transportation.and.warehousing..48.49.", "Educational.services..61.", "Health.care.and.social.assistance..62.","Accommodation.and.food.services..72.", "Other.services..except.public.administration...81.", "Public.administration..91.", "Agriculture..forestry..fishing.and.hunting..11.mining.21", "Wholesale.and.retail.trade..41..44.45.", "Finance..insurance..real.estate..rental.and.leasing..52.53.", "Professional..scientific.and.technical.services..54.",  "Information..culture.and.recreation..51..71.")
+
+
+```
+
+
+
+
+GDP annual
+THWSA_wide needs to converted to annual
+
+
+## THW at annual frequency
+
+```{r}
+
+GDPfinal_wide1=GDPfinal_wide %>% filter(Date >= "1987-01-01" & Date <= "2021-12-01")
+THWSA_wide1=THWSA_wide %>% filter(Date >= "1986-12-01" & Date <= "2021-12-01")
+
+info_columns <- subset (GDPfinal_wide1, select = c(year))
+
+THWSA_wide2 = cbind(info_columns,THWSA_wide1)
+
+#
+
+#prov1 = select(EMP, GEO)%>%unique()
+
+#THWSA_den <- THWSA_wide %>% select(-contains("Date"))
+zzz<-colnames(THWSA_wide)
+zzz<-zzz[zzz != "Date"]
+
+scale2 <- function(x, na.rm = FALSE) mean(x)
+new_averageTHWSA_wide = THWSA_wide2 %>% 
+  #filter(GEO !="Canada") %>%
+  group_by(year) %>% 
+  mutate(across(all_of(zzz),scale2))%>%# all our NAICS encoded variables end with numbers
+  ungroup()
+
+#Converting to annual:
+
+data_new1 <- new_averageTHWSA_wide                                   # Duplicate data
+data_new1$year <- strftime(data_new1$date, "%Y")    # Create year column
+data_new1$month <- strftime(data_new1$date, "%m")   # Create month column
+head(data_new1)  
+
+
+
+data_aggr1 <- aggregate(value ~ month + year,       # Aggregate data
+                        data_new1,
+                        FUN = sum)
+head(data_aggr1) 
+
+
+```
+
+
+
+
+

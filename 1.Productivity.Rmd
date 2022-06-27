@@ -1,0 +1,145 @@
+---
+title: "1.d-Data_from_cansim_hours"
+author: "Raven Wheesk"
+date: "6/17/2022"
+output: html_document
+---
+
+# Data Provider
+
+Statistics Canada hosts a large set of socio-economic [datasets](https://www150.statcan.gc.ca/n1//en/type/data?MM=1#tables). 
+
+
+# Basic libraries and R version
+
+```{R, message = FALSE, warning = FALSE}
+library(tidyverse) # for its nice flow.
+library(cansim) #for pulling Stat Can socioeconomic data
+library(lubridate) # for dealing with dates
+library(GGally) # for pairs plot
+library(ggpubr) # for putting a regression equation onto a ggplot figure
+library(glue)   # used for dynamic variable construction
+library(dplyr)  # for data manipulation
+
+# set up data location:
+location = "R:/res/wher/Google_Climate_Dataset/"
+```
+
+```{R version}
+version
+```
+
+# Loading data
+```{r loaddata, echo = FALSE}
+# loading from here to avoid re-downloading
+#load("Total_hours_and_GDP.Rdata")
+load("1.LFS.Rdata")
+load("1.GDP.Rdata")
+
+```
+
+```{r loading, message = FALSE, warning = FALSE}
+
+# # GDP monthly, national:
+GDP_wide       = read_csv(file = paste0(location, "1.c-Data_From_Cansim-GDP.csv"))
+# # GDP annual, provincial:
+GDPAnnual_wide = read_csv(file = paste0(location, "1.c-Data_From_Cansim-GDPAnnual.csv"))
+full_dict_new <- read_csv(file = paste0(location, '2.c_full_dict_mapping_THW_GDP_LFS_Census.csv'))
+
+naics_gdp_vars <- full_dict_new %>% filter(naics !=  "N/A" )%>% pull(GDP_ind_names) %>% unique() 
+naics_thw_vars <- full_dict_new %>% filter(naics !=  "N/A" )%>% pull(THW_ind_names) %>% unique() 
+
+
+
+
+```
+
+
+
+## The following is Dave's productivity calculations for 2007-
+
+```{r, warnings = FALSE}
+
+GDP_annual_national_by_NAICS = GDP_post2007 %>% 
+  select(year,all_of(naics_gdp_vars)) %>%
+  group_by(year)%>%
+  summarize(across(everything(),sum))%>% ungroup()
+
+
+# want to convert GDP within a NAICS into GDP fraction per province
+
+GDP_Totals_annual_provincial_by_NAICS = 
+  eval(parse(text=
+     # obtain a column of NATIONAL totals within each NAICS group for each year:
+   glue(paste0(
+    'GDPAnnual_post2007 %>% 
+    group_by(Date)%>% # within a year
+    mutate(',paste(paste0("Total_All_Provinces.",naics_gdp_vars,"=sum(",naics_gdp_vars,")"),collapse=","),')'))
+))%>%
+  ungroup()
+```
+
+
+## Obtain the provincial fraction of {national, annual, GDP per sector}  
+
+
+```{r}
+# complete the fraction
+GDP_fraction_annual_provincial_by_NAIC =
+  eval(parse(text=
+  # obtain a column of PROVINCIAL FRACTIONS within each NAICS group for each year:
+glue(paste0(
+  ' GDP_Totals_annual_provincial_by_NAICS %>% mutate(',paste(paste0("Fraction_Annual_Provinces.",naics_gdp_vars,"=",naics_gdp_vars,"/","Total_All_Provinces.",naics_gdp_vars),collapse=","),')'))
+))
+```
+
+# Obtain the monthly GDP allocation for \{sector, province\}
+Using annual fraction of GDP per \{province, sector\} assume that GDP per sector maintains a constant fractional allocation per \{province, month\}.
+
+Calculate the monthly GDP per \{sector, province\} by taking the annual fraction of NAICS sector within a province and applying that fraction to monthly national GDP:
+
+
+
+```{r}
+# craft the building blocks:
+GDP_FRACTIONS_annual_provincial_by_NAIC = GDP_fraction_annual_provincial_by_NAIC%>% 
+   separate(Date, into = c("year","month","day")) %>% 
+  mutate(year = as.numeric(year))%>%
+   select(GEO, year, paste0("Fraction_Annual_Provinces.",naics_gdp_vars))
+
+
+GDP_monthly_national_by_NAICS = GDP_post2007 %>% select(Date, year, month, all_of(naics_gdp_vars))
+
+
+
+# join these together then multiply the fraction allocated to a province to the monthly GDP total
+ GDP_total_monthly_by_province_sector = eval(parse(text=
+     # obtain a column of NATIONAL totals within each NAICS group for each year:
+   glue(paste0(
+     'GDP_FRACTIONS_annual_provincial_by_NAIC %>% 
+     inner_join(GDP_monthly_national_by_NAICS) %>%
+     group_by(year)%>%
+     mutate(',paste(paste0("GDP_allocation_for_province.",naics_gdp_vars,"=Fraction_Annual_Provinces.",naics_gdp_vars,"*",naics_gdp_vars),collapse=","),')'))
+))%>%
+  ungroup()%>%
+   select(Date, GEO,starts_with('GDP_allocation_for_province')) # cleanup
+
+ 
+ 
+
+```
+
+
+
+```{r}
+
+
+
+
+
+```
+
+
+
+
+
