@@ -57,8 +57,6 @@ GDP.variables = c("Utilities..22.",
 
 #This includes our total, "All.industries.ours"
 GDP.variables1 = c("Utilities..22.", "Construction..23.", "Manufacturing..31.33.",    "Transportation.and.warehousing..48.49.", "Educational.services..61.", "Health.care.and.social.assistance..62.","Accommodation.and.food.services..72.", "Other.services..except.public.administration...81.", "Public.administration..91.", "Agriculture..forestry..fishing.and.hunting..11.mining.21", "Wholesale.and.retail.trade..41..44.45.", "Finance..insurance..real.estate..rental.and.leasing..52.53.", "Professional..scientific.and.technical.services..54.",  "Information..culture.and.recreation..51..71.","All.industries.ours")
-
-
 ```
 
 # We need to create a seasonal factor for employment from the seasonally adjusted and non-seasonally adjusted data. First, we need to clean up the tables from Cansim. 
@@ -93,7 +91,6 @@ eval(parse(text=
 # Pivot into a wide table for manipulations later
 EMPSA_wide <- EMPSA_wide[c("GEO", "Date", GDP.variables1)]
 EMPSA_wide <- pivot_wider(EMPSA_wide, names_from = "GEO", values_from=c(GDP.variables1))
-
 
 # Employment - seasonally adjusted and non-seasonally adjusted
 
@@ -138,8 +135,6 @@ EMPSF_wide <- cbind(info_columns, EMPSA1/EMPNSA1)
 
 EMPSF_wide <- subset(EMPSF_wide, Date > as.Date("1986-12-01"))
 ```
-
-
 
 ### We want to create a seasonal factor using total hours worked. The seasonally adjusted series is not available for provinces, so we calculate a national seasonal factor.
 #First, we clean the THW tables from Cansim.
@@ -262,15 +257,10 @@ for(j in 1:ncol(THWNSA_wide)){
   THWNSA_wide[i , j] <- ifelse(is.na(THWNSA_wide[i, j]), THWNSA_wide[(i-1),j]*(1+(THWNSA_wide[(i-12),j]/THWNSA_wide[(i-13),j]-1)), THWNSA_wide[i ,j]) 
   }
 }
-
 ```
 
 # Now we want to create our province-level seasonally-adjusted THW dataframe by multiplying the provincial non-seasonally-adjusted measure, by a ratio of our THW seasonal factor (for Canada) and the relative seasonal factors for EMP:
-##          (THWNSA_wide province j industry i) * 
-##          (THWSF_CAN_wide Canada industry i) / 
-##          (EMPSF_wide province j industry i / EMPSF_wide Canada industry i)
-
-
+##          (THWNSA_wide province j industry i) * (THWSF_CAN_wide Canada industry i) * (EMPSF_wide province j industry i / EMPSF_wide Canada industry i)
 # First, create a ratio of the seasonal factors for each province and industry and each industry for Canada:
 ##(EMPSF_wide province j industry i / EMPSF_wide Canada industry i)
 
@@ -286,7 +276,6 @@ EMPSF_ratio1 <- data.frame(do.call(cbind,rep(EMPSF_ratio_CAN, each=11)), check.n
 
 EMPSF_ratio2 <- EMPSF_ratio/EMPSF_ratio1
 
-
 ####Imputing missing values using the previous year's growth rate.
 
 EMPSF_ratio2 <- EMPSF_ratio2                                              
@@ -295,39 +284,22 @@ for(j in 1:ncol(EMPSF_ratio2)){
   EMPSF_ratio2[i , j] <- ifelse(is.na(EMPSF_ratio2[i, j]), EMPSF_ratio2[(i-1),j]*(1+(EMPSF_ratio2[(i-12),j]/EMPSF_ratio2[(i-13),j]-1)), EMPSF_ratio2[i ,j]) 
   }
 }
-
-
 EMPSF_ratio <- cbind(Date_column, EMPSF_ratio2)
-
 ```
 
+## Now we calculate our new THWSA_wide using our seasonal adjustment: THWSA_wide = THWNSA_wide*THWSF_CAN_extend*EMPSF_ratio
+```{r}
 ##(THWSF_CAN_wide Canada industry i) - need to create a dataframe with the seasonal factor for Canada industry i that has equal dimensions to the provincial dataframes.
-
-```{r}
-
 THWSF_CAN_extend <- THWSF_CAN_wide
-THWSF_CAN_extend <- THWSF_CAN_extend %>% select(-contains("Date"))
-
-THWSF_CAN_extend <- THWSF_CAN_wide %>% select(contains("Canada"))
-
+THWSF_CAN_extend <- THWSF_CAN_extend %>% select(-contains("Date")) %>% select(contains("Canada"))
 THWSF_CAN_extend <- data.frame(do.call(cbind,rep(THWSF_CAN_extend, each=11)), check.names = F)
-
-```
-
-
-## Now we calculate our new THWSA_wide using our seasonal adjustment: THWSA_wide = THWNSA_wide*THWSF_CAN_extend/EMPSF_ratio
-
-```{r}
 
 THWNSA_wide <- THWNSA_wide %>% select(-contains("Date"))
 EMPSF_ratio <- EMPSF_ratio %>% select(-contains("Date"))
 
-
+#calculate new THWSA_wide:
 THWSA_wide = THWNSA_wide*THWSF_CAN_extend*EMPSF_ratio
-
 THWSA_wide <- cbind(Date_column, THWSA_wide)
-
-
 
 col1 = c(paste0(GDP.variables,"_Canada",sep=""))
 col2 = c(GDP.variables)
@@ -338,7 +310,6 @@ for (counter in c(1:length(col1))){
 }
 
 #The above creates a dataframe with the Canada columns nested within the THWSA_wide dataframe. This unnests it:
-
    unnest_dataframes <- function(x) {
 
         y <- do.call(data.frame, x)
@@ -350,43 +321,32 @@ for (counter in c(1:length(col1))){
     }
 
     THWSA_wide <- unnest_dataframes(THWSA_wide)
-
+    
 #fixing the names  
 names(THWSA_wide) <- gsub("Newfoundland.and.Labrador", "Newfoundland and Labrador", names(THWSA_wide))
 names(THWSA_wide) <- gsub("Prince.Edward.Island", "Prince Edward Island", names(THWSA_wide))
 names(THWSA_wide) <- gsub("Nova.Scotia", "Nova Scotia", names(THWSA_wide))
 names(THWSA_wide) <- gsub("New.Brunswick", "New Brunswick", names(THWSA_wide))
 names(THWSA_wide) <- gsub("British.Columbia", "British Columbia", names(THWSA_wide))
-
-
 ```
 
-
 ##We will need the labour share of hours worked by sector and provinces for our estimated GDP. Here we calculate it:
-
 ```{r}
 # Need a dataframe containing only Canada values
 THWSA_Canada <- THWSA_wide
-THWSA_Canada <- THWSA_Canada %>% select(-contains("Date"))
-THWSA_Canada <- THWSA_Canada %>% select(contains("Canada"))
-
+THWSA_Canada <- THWSA_Canada %>% select(-contains("Date"))%>% select(contains("Canada"))
 THWSA_Canada <- data.frame(do.call(cbind,rep(THWSA_Canada, each=11)), check.names = F)
 
 THWSA_wide <- THWSA_wide %>% select(-contains("Date"))
-
+#Labour share:
 THWSA_share = THWSA_wide/THWSA_Canada
 
 THWSA_share <- cbind(Date_column, THWSA_share)
-
 THWSA_wide <- cbind(Date_column, THWSA_wide)
-
-
 ```
-
 
 # Saving the outputs:
 ```{r}
-
 THWSA_wide       %>% write_csv(file = paste0(location,"1.LFS.csv"))
 THWSA_share       %>% write_csv(file = paste0(location,"1.LFS_share.csv"))
 

@@ -202,7 +202,6 @@ GDPsic_wide =
   rename_all(make.names) # rebuilt the SIC names
 ```
 
-
 # Aggregating some SIC categories to match NAICS and LFS
 ```{r}
 GDPsic_wide = GDPsic_wide %>%
@@ -231,8 +230,7 @@ GDPsic_wide = GDPsic_wide %>%
   mutate(Utilities..22. = Other.utility.industries)%>%
   mutate(Construction..23. = Construction.industries)%>%
   mutate(Manufacturing..31.33. = Manufacturing.industries)%>%
-  mutate(Finance..insurance..real.estate..rental.and.leasing..52.53. =
-Finance..insurance.and.real.estate.industries)%>%
+  mutate(Finance..insurance..real.estate..rental.and.leasing..52.53. = Finance..insurance.and.real.estate.industries)%>%
   mutate(Professional..scientific.and.technical.services..54. = Business.services.industries)%>%
   mutate(Public.administration..91. = Government.service.industries)%>%
   mutate(Educational.services..61. = Educational.service.industries)%>%
@@ -245,7 +243,6 @@ GDPsic_wide <- GDPsic_wide %>% select("GEO", "Date", "year", "month", (contains(
 
 #Changing range of GDPsic_wide:
 GDPsic_wide=GDPsic_wide %>% filter(Date >= "1975-12-01" & Date <= "1997-01-01")
-
 ```
 
 ## Splicing GDPsic_wide and GDP_wide - GDP_sic uses constant prices, and GDP_wide uses 2012 chained prices. To splice them, we need to shift the level of the GDPsic_wide to that of GDP_wide. 
@@ -265,7 +262,6 @@ GDP_wide_test["GEO"] = "Canada"
 
 GDP_wide_test["year"] = format(GDP_wide_test["Date"],format="%Y")
 GDP_wide_test["month"] = format(GDP_wide_test["Date"],format="%m")
-
 ```
 
 #Now we do the same to GDPsic_wide, but with a blank dataframe from 1997 onward. 
@@ -287,18 +283,14 @@ GDPsic_wide_test["GEO"] = "Canada"
 
 GDPsic_wide_test["year"] = format(GDP_wide_test["Date"],format="%Y")
 GDPsic_wide_test["month"] = format(GDP_wide_test["Date"],format="%m")
-
-```
-
-#We use full_join to join the two tables together.
-```{r}
-GDPfinal_wide <- GDPsic_wide_test %>%
-  full_join(GDP_wide_test, by=c("Date", "GEO", "year", "month"),all=TRUE)
-
 ```
 
 #Now we splice the data using a backward loop starting in 1997. 
 ```{r}
+#We use full_join to join the two tables together.
+GDPfinal_wide <- GDPsic_wide_test %>%
+  full_join(GDP_wide_test, by=c("Date", "GEO", "year", "month"),all=TRUE)
+
 #(1) Looping backward from 2006-12-01:
 start     <- as.Date("97-01-01",format="%y-%m-%d")
 end   <- as.Date("75-12-01",format="%y-%m-%d")
@@ -317,9 +309,7 @@ while (theDate >= end){
 
 #Dropping unnecessary columns
 GDPfinal_wide <- GDPfinal_wide %>% select("GEO", "Date", "year", "month",(c(paste0(GDP.variables,".y",sep=""),"All.industries.ours.y")))
-
 colnames(GDPfinal_wide)<-gsub(".y","",colnames(GDPfinal_wide))
-
 ```
 
 ## We also need GDP by province by industry annual for calculating productivity later. Here we clean the table, 
