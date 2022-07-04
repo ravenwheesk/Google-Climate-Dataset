@@ -1,5 +1,5 @@
 ---
-title: "1.d-Data_from_cansim_hours"
+title: "1.Productivity"
 author: "Raven Wheesk"
 date: "6/17/2022"
 output: html_document
@@ -8,6 +8,8 @@ output: html_document
 # Data Provider
 
 Statistics Canada hosts a large set of socio-economic [datasets](https://www150.statcan.gc.ca/n1//en/type/data?MM=1#tables). 
+
+# Objective: Use the monthly, provincial GDP by industry calculated in 1.GDP_complete, the seasonally adjusted total hours worked by province and industry, and the labour share of hours worked by province and industry to calculate provincial GDP for each industry. 
 
 
 # Basic libraries and R version
@@ -20,9 +22,9 @@ library(GGally) # for pairs plot
 library(ggpubr) # for putting a regression equation onto a ggplot figure
 library(glue)   # used for dynamic variable construction
 library(dplyr)  # for data manipulation
-
+library(data.table)
 # set up data location:
-location = "R:/res/wher/Google_Climate_Dataset/"
+location = "C:/users/wher/OneDrive - Bank of Canada/MyDocs/Google_Climate_Dataset/"
 ```
 
 ```{R version}
@@ -35,111 +37,217 @@ version
 #load("Total_hours_and_GDP.Rdata")
 load("1.LFS.Rdata")
 load("1.GDP.Rdata")
-
 ```
 
-```{r loading, message = FALSE, warning = FALSE}
-
-# # GDP monthly, national:
-GDP_wide       = read_csv(file = paste0(location, "1.c-Data_From_Cansim-GDP.csv"))
-# # GDP annual, provincial:
-GDPAnnual_wide = read_csv(file = paste0(location, "1.c-Data_From_Cansim-GDPAnnual.csv"))
-full_dict_new <- read_csv(file = paste0(location, '2.c_full_dict_mapping_THW_GDP_LFS_Census.csv'))
-
-naics_gdp_vars <- full_dict_new %>% filter(naics !=  "N/A" )%>% pull(GDP_ind_names) %>% unique() 
-naics_thw_vars <- full_dict_new %>% filter(naics !=  "N/A" )%>% pull(THW_ind_names) %>% unique() 
-
-
-
-
-```
-
-
-
-## The following is Dave's productivity calculations for 2007-
-
-```{r, warnings = FALSE}
-
-GDP_annual_national_by_NAICS = GDP_post2007 %>% 
-  select(year,all_of(naics_gdp_vars)) %>%
-  group_by(year)%>%
-  summarize(across(everything(),sum))%>% ungroup()
-
-
-# want to convert GDP within a NAICS into GDP fraction per province
-
-GDP_Totals_annual_provincial_by_NAICS = 
-  eval(parse(text=
-     # obtain a column of NATIONAL totals within each NAICS group for each year:
-   glue(paste0(
-    'GDPAnnual_post2007 %>% 
-    group_by(Date)%>% # within a year
-    mutate(',paste(paste0("Total_All_Provinces.",naics_gdp_vars,"=sum(",naics_gdp_vars,")"),collapse=","),')'))
-))%>%
-  ungroup()
-```
-
-
-## Obtain the provincial fraction of {national, annual, GDP per sector}  
-
-
+#Variable lists:
 ```{r}
-# complete the fraction
-GDP_fraction_annual_provincial_by_NAIC =
-  eval(parse(text=
-  # obtain a column of PROVINCIAL FRACTIONS within each NAICS group for each year:
+GDP.variables = c(
+"Utilities..22.",
+"Construction..23.",                                  
+"Manufacturing..31.33.",  
+"Transportation.and.warehousing..48.49.", 
+"Educational.services..61.",                      
+"Health.care.and.social.assistance..62.",
+"Accommodation.and.food.services..72.",
+"Other.services..except.public.administration...81.",
+"Public.administration..91.",
+"Agriculture..forestry..fishing.and.hunting..11.mining.21",
+"Wholesale.and.retail.trade..41..44.45.",
+"Finance..insurance..real.estate..rental.and.leasing..52.53.",
+"Professional..scientific.and.technical.services..54.", 
+"Information..culture.and.recreation..51..71.")
+
+#This includes our total, "All.industries.ours"
+GDP.variables1 = c(
+"Utilities..22.", 
+"Construction..23.", 
+"Manufacturing..31.33.",    
+"Transportation.and.warehousing..48.49.", 
+"Educational.services..61.", 
+"Health.care.and.social.assistance..62.",
+"Accommodation.and.food.services..72.", "Other.services..except.public.administration...81.", "Public.administration..91.", "Agriculture..forestry..fishing.and.hunting..11.mining.21", "Wholesale.and.retail.trade..41..44.45.", "Finance..insurance..real.estate..rental.and.leasing..52.53.", "Professional..scientific.and.technical.services..54.",  "Information..culture.and.recreation..51..71.",
+"All.industries.ours")
+```
+
+## To calculate annual productivity (GDPAnnual_wide/THWSA_wide), we need to convert THWSA_wide to annual. Here we also clean up the tables so that they have identical dimensions for dividing. 
+```{r}
+#Note since we're calculating annual productivity, we restrict the range to the most recent full year.
+GDPfinal_wide1=GDPfinal_wide %>% filter(Date >= "1987-01-01" & Date <= "2021-12-01")
+THWSA_wide1=THWSA_wide %>% filter(Date >= "1986-12-01" & Date <= "2021-12-01")
+info_columns <- subset (GDPfinal_wide1, select = c(year))
+Date_column <- subset (GDPfinal_wide1, select = c(Date, year, month))
+
+THWSA_wide1 = cbind(info_columns,THWSA_wide1)
+
+#Generate our THWSA annual dataframe + tidy up column names
+THWSAAnnual_wide <- THWSA_wide1 %>%
+  group_by(year) %>% 
+  dplyr::summarize(across(everything(), list(mean))) %>% 
+  as.data.frame()
+
+THWSAAnnual_wide =  THWSAAnnual_wide %>% rename_with(~str_remove(., '_1'))
+THWSAAnnual_wide=THWSAAnnual_wide %>% filter(Date >= "1997-01-01" & Date <= "2021-12-01")
+#Drop territories
+GDPAnnual_wide1 <- GDPAnnual_wide %>% select("Date", (contains({GDP.variables1})), -contains(c("_Nunavut", "_Yukon", "_Northwest Territories")))
+THWSAAnnual_wide1 <- THWSAAnnual_wide %>% select(-contains("year"))
+
+# obtain a column of NATIONAL totals within each NAICS group for each year. We do this by creating a sum. Since we sum across rows but still want our Canada column, we make Canada = 0 to avoid double counting (note, this can probably be done a different way).
+GDPAnnual_wide1 =
+eval(parse(text=
 glue(paste0(
-  ' GDP_Totals_annual_provincial_by_NAICS %>% mutate(',paste(paste0("Fraction_Annual_Provinces.",naics_gdp_vars,"=",naics_gdp_vars,"/","Total_All_Provinces.",naics_gdp_vars),collapse=","),')'))
-))
-```
-
-# Obtain the monthly GDP allocation for \{sector, province\}
-Using annual fraction of GDP per \{province, sector\} assume that GDP per sector maintains a constant fractional allocation per \{province, month\}.
-
-Calculate the monthly GDP per \{sector, province\} by taking the annual fraction of NAICS sector within a province and applying that fraction to monthly national GDP:
-
-
-
-```{r}
-# craft the building blocks:
-GDP_FRACTIONS_annual_provincial_by_NAIC = GDP_fraction_annual_provincial_by_NAIC%>% 
-   separate(Date, into = c("year","month","day")) %>% 
-  mutate(year = as.numeric(year))%>%
-   select(GEO, year, paste0("Fraction_Annual_Provinces.",naics_gdp_vars))
-
-
-GDP_monthly_national_by_NAICS = GDP_post2007 %>% select(Date, year, month, all_of(naics_gdp_vars))
-
-
-
-# join these together then multiply the fraction allocated to a province to the monthly GDP total
- GDP_total_monthly_by_province_sector = eval(parse(text=
-     # obtain a column of NATIONAL totals within each NAICS group for each year:
-   glue(paste0(
-     'GDP_FRACTIONS_annual_provincial_by_NAIC %>% 
-     inner_join(GDP_monthly_national_by_NAICS) %>%
-     group_by(year)%>%
-     mutate(',paste(paste0("GDP_allocation_for_province.",naics_gdp_vars,"=Fraction_Annual_Provinces.",naics_gdp_vars,"*",naics_gdp_vars),collapse=","),')'))
+'GDPAnnual_wide1 %>%
+group_by(Date)%>% # within a year
+mutate(',paste(paste0(GDP.variables1,"_Canada","=0,"),collapse=","),')'))
 ))%>%
-  ungroup()%>%
-   select(Date, GEO,starts_with('GDP_allocation_for_province')) # cleanup
+ungroup()
 
- 
- 
+col1 = c(paste0(GDP.variables1,"_Canada",sep=""))
+col2 = c(GDP.variables1)
+counter = 1
+for (counter in c(1:length(col1))){
+  GDPAnnual_wide1 = GDPAnnual_wide1 %>% mutate(across(col1[counter], ~ rowSums(select(GDPAnnual_wide1,contains({col2[counter]})))))
 
+}
 ```
 
-
-
+#Calculating productivity:
 ```{r}
+columnlist = c(colnames(THWSAAnnual_wide1))
 
+GDPAnnual_wide1 <- GDPAnnual_wide1[,columnlist]
 
+info_columns_annual <- subset (GDPAnnual_wide2, select = c(Date))
+GDPAnnual_wide1 = subset(GDPAnnual_wide1, select = -c(Date) )
+THWSAAnnual_wide1 = subset(THWSAAnnual_wide1, select = -c(Date) )
 
+#Take the annual GDP and THW dataframes and create a productivity dataframe
+productivity = GDPAnnual_wide1/THWSAAnnual_wide1*1000
 
+productivity = cbind(info_columns_annual,productivity)
 
 ```
 
+#Now we want to extend our productivity dataframe back to 1987. For convenience right now, we assume productivity remains constant between 1987 and 1997. Note that we could use a different approach here.
+```{r}
+dates<-seq(from=as.Date("1987-07-01","19%y-%m-%d"),to=as.Date("1996-07-01","19%y-%m-%d"),by="year")
+cols <- c(columnlist)
 
+productivity_blank <- data.frame(matrix(1, nrow = length(dates), ncol = 166))
+names(productivity_blank) <- cols
+productivity_blank$Date <- dates
 
+productivity1 = rbind(productivity_blank,productivity)
+columnlist1 = columnlist[-1]
 
+start     <- as.Date("97-07-01",format="%y-%m-%d")
+end   <- as.Date("87-07-01",format="%y-%m-%d")
 
+for (counter in c(2:length(columnlist1))){
+  theDate <- start
+while (theDate >= end){
+  productivity1 = productivity1 %>% mutate(across(columnlist[counter], ~ case_when( (Date < as.Date("97-07-01", format="%y-%m-%d")) ~ lead(get(columnlist[counter])),(Date >= as.Date("97-07-01", format="%y-%m-%d")) ~ get(columnlist[counter]))))
+  theDate <- theDate - 1}
+}
+
+```
+
+# Now that we have annual productivity, we need to convert it to monthly for calculating monthly GDP. 
+```{r}
+#Add year and month variables
+DT <- productivity1
+setDT(DT)
+DT[, Date := as.IDate(Date)]
+DT[, year := year(Date)]
+setkey(DT, year)
+productivity2 <- DT[CJ(year, month = 1:12)]
+print(productivity2)
+
+class(productivity2) <- class(as.data.frame(productivity2))
+
+productivity2 <- productivity2 %>% filter(Date <= "2021-12-01") %>% select(-contains(c("Date","year","month")))
+
+THWSA_share1 <- THWSA_share %>% filter(Date <= "2021-12-01") %>% select(-contains(c("Date")))
+
+#Adjusting productivity by the labour share - check this
+productivity_share <- productivity2*THWSA_share1
+
+GDP.variables.list <- c(GDP.variables1)
+
+col1 = c(paste0(GDP.variables.list,"_Canada",sep=""))
+col2 = c(GDP.variables.list)
+counter = 1
+for (counter in c(1:length(col1))){
+  productivity_share = productivity_share %>% mutate(across(col1[counter], ~ rowSums(select(productivity_share,contains({col2[counter]})))-select(productivity_share,contains({col1[counter]}))))
+
+}
+
+unnest_dataframes <- function(x) {
+
+        y <- do.call(data.frame, x)
+
+        if("data.frame" %in% sapply(y, class)) unnest_dataframes(y)
+
+        y
+
+    }
+
+    productivity_share <- unnest_dataframes(productivity_share)
+#Cleaning up names
+names(productivity_share) <- gsub("Newfoundland.and.Labrador", "Newfoundland and Labrador", names(productivity_share))
+names(productivity_share) <- gsub("Prince.Edward.Island", "Prince Edward Island", names(productivity_share))
+names(productivity_share) <- gsub("Nova.Scotia", "Nova Scotia", names(productivity_share))
+names(productivity_share) <- gsub("New.Brunswick", "New Brunswick", names(productivity_share))
+names(productivity_share) <- gsub("British.Columbia", "British Columbia", names(productivity_share))
+```
+
+# Productivity varies across industries and provinces. We need to calculate the relative productivity between provinces and Canada for a given industry to adjust our estimates. 
+```{r}    
+productivity_CAN <- productivity_share %>% select(contains("Canada"))
+##
+#GDP.variables.list <- c(GDP.variables1)
+col1 = c(paste0(GDP.variables.list,"_Canada",sep=""))
+col2 = c(GDP.variables.list)
+counter = 1
+for (counter in c(1:length(col1))){
+  productivity_prov = productivity_prov %>% mutate(across(col1[counter], ~ select(productivity_CAN,contains({col1[counter]}))))
+
+}
+#Cleaning up names
+productivity_prov <- unnest_dataframes(productivity_prov)
+names(productivity_prov) <- gsub("Newfoundland.and.Labrador", "Newfoundland and Labrador", names(productivity_prov))
+names(productivity_prov) <- gsub("Prince.Edward.Island", "Prince Edward Island", names(productivity_prov))
+names(productivity_prov) <- gsub("Nova.Scotia", "Nova Scotia", names(productivity_prov))
+names(productivity_prov) <- gsub("New.Brunswick", "New Brunswick", names(productivity_prov))
+names(productivity_prov) <- gsub("British.Columbia", "British Columbia", names(productivity_prov))
+
+productivity_CAN <- data.frame(do.call(cbind,rep(productivity_CAN, each=11)), check.names = F)
+productivity_ratio <- productivity_prov/productivity_CAN
+productivity_ratio <- cbind(Date_column, productivity_ratio)
+```
+### Finally, we calculate our GDP by NAICS by month with: TWHSA_wide * THWSA_share * productivity_ratio
+```{r}
+productivity_ratio1 <- productivity_ratio %>% select(-contains(c("Date", "year", "month")))
+GDPfinal_wide1 <- GDPfinal_wide1 %>% select(-contains(c("GEO","Date", "year", "month")))
+GDPfinal_wide1 <- data.frame(do.call(cbind,rep(GDPfinal_wide1, each=11)), check.names = F)
+THWSA_share1 <- THWSA_share %>% filter(Date <= "2021-12-01") %>% select(-contains("Date"))
+
+finalGDP_bys_byp <- GDPfinal_wide1*(THWSA_share1)*productivity_ratio1
+
+finalGDP_bys_byp <- cbind(Date_column, finalGDP_bys_byp)
+colnames(finalGDP_bys_byp) <- c(colnames(productivity_ratio))
+```
+
+# For Dave, we pivot_long the table to have columns for GEO, and each NAICS
+```{r}
+finalGDP_bys_byp_long <- pivot_longer(finalGDP_bys_byp, -c(Date,year, month), names_to = c("NAICS", "GEO"), names_sep = "_", values_to = "values") %>% 
+  #dplyr::select(-question) %>% 
+  dplyr::arrange(year, month)
+
+finalGDP_bys_byp_long = finalGDP_bys_byp_long %>% pivot_wider(names_from= NAICS, values_from=values) 
+```
+
+#Saving final output
+```{r}
+finalGDP_bys_byp_long       %>% write_csv(file = paste0(location,"finalGDP.csv"))
+finalGDP_bys_byp            %>% write_csv(file=paste0(location, "finalGDPwide.csv"))
+```

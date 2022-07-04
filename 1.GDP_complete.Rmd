@@ -1,5 +1,5 @@
 ---
-title: "1.c-Data_from_cansim_GDP"
+title: "1.GDP_complete"
 author: "Raven Wheesk"
 date: "6/17/2022"
 output: html_document
@@ -22,7 +22,7 @@ library(glue)   # used for dynamic variable construction
 library(dplyr)  # for data manipulation
 
 # set up data location:
-location = "R:/res/wher/Google_Climate_Dataset/"
+location = "C:/users/wher/OneDrive - Bank of Canada/MyDocs/Google_Climate_Dataset/"
 ```
 
 ```{R version}
@@ -61,58 +61,70 @@ NAICS_higher_levels = c(
 "Other services (except public administration) [81]",
 "Public administration [91]")
 
-GDP.variables = c("Utilities..22.",
-      "Construction..23.",                                  
-      "Manufacturing..31.33.",  
-      "Transportation.and.warehousing..48.49.", 
-      "Educational.services..61.",                      
-      "Health.care.and.social.assistance..62.",
-      "Accommodation.and.food.services..72.",
-      "Other.services..except.public.administration...81.",
-      "Public.administration..91.",
-      "Agriculture..forestry..fishing.and.hunting..11.mining.21",
-      "Wholesale.and.retail.trade..41..44.45.",
-      "Finance..insurance..real.estate..rental.and.leasing..52.53.",
-      "Professional..scientific.and.technical.services..54.", 
-      "Information..culture.and.recreation..51..71.")
+GDP.variables = c(
+"Utilities..22.",
+"Construction..23.",                                  
+"Manufacturing..31.33.",  
+"Transportation.and.warehousing..48.49.", 
+"Educational.services..61.",                      
+"Health.care.and.social.assistance..62.",
+"Accommodation.and.food.services..72.",
+"Other.services..except.public.administration...81.",
+"Public.administration..91.",
+"Agriculture..forestry..fishing.and.hunting..11.mining.21",
+"Wholesale.and.retail.trade..41..44.45.",
+"Finance..insurance..real.estate..rental.and.leasing..52.53.",
+"Professional..scientific.and.technical.services..54.", 
+"Information..culture.and.recreation..51..71.")
 
 SIC_NAICS_common = c(
-  "All industries",
-  "Agricultural and related services industries",
-  "Fishing and trapping industries",
-  "Logging and forestry industries",
-  "Mining (including milling), quarrying and oil well industries",
-  "Manufacturing industries",
-  "Construction industries",
-  "Transportation and storage industries",
-  "Communication industries",
-  "Other utility industries",
-  "Wholesale trade industries",
-  "Retail trade industries",
-  "Finance, insurance and real estate industries",
-  "Business services industries",
-  "Government service industries",
-  "Educational service industries",
-  "Health and social service industries",
-  "Accommodation, food and beverage service industries",
-  "Other service industries",
-  "Amusement and recreational service industries",
-  "Postal and courier service industries")
+"All industries",
+"Agricultural and related services industries",
+"Fishing and trapping industries",
+"Logging and forestry industries",
+"Mining (including milling), quarrying and oil well industries",
+"Manufacturing industries",
+"Construction industries",
+"Transportation and storage industries",
+"Communication industries",
+"Other utility industries",
+"Wholesale trade industries",
+"Retail trade industries",
+"Finance, insurance and real estate industries",
+"Business services industries",
+"Government service industries",
+"Educational service industries",
+"Health and social service industries",
+"Accommodation, food and beverage service industries",
+"Other service industries",
+"Amusement and recreational service industries",
+"Postal and courier service industries")
 
-GDPsic.variables = c("Agriculture..forestry..fishing.and.hunting..11.mining.21",
-  "Manufacturing.industries",
-  "Construction.industries",
-  "Transportation.and.warehousing..48.49.",
-  "Information..culture.and.recreation..51..71.",
-  "Other.utility.industries",
-  "Wholesale.and.retail.trade..41..44.45.",
-  "Finance..insurance.and.real.estate.industries",
-  "Business.services.industries",
-  "Government.service.industries",
-  "Educational.service.industries",
-  "Health.and.social.service.industries",
-  "Accommodation..food.and.beverage.service.industries",
-  "Other.service.industries") 
+GDPsic.variables = c(
+"Agriculture..forestry..fishing.and.hunting..11.mining.21",
+"Manufacturing.industries",
+"Construction.industries",
+"Transportation.and.warehousing..48.49.",
+"Information..culture.and.recreation..51..71.",
+"Other.utility.industries",
+"Wholesale.and.retail.trade..41..44.45.",
+"Finance..insurance.and.real.estate.industries",
+"Business.services.industries",
+"Government.service.industries",
+"Educational.service.industries",
+"Health.and.social.service.industries",
+"Accommodation..food.and.beverage.service.industries",
+"Other.service.industries") 
+
+GDPannual.variables = c(
+"All.industries..T001.",
+"Utilities..22.", 
+"Construction..23.", 
+"Manufacturing..31.33.",    
+"Transportation.and.warehousing..48.49.", 
+"Educational.services..61.", 
+"Health.care.and.social.assistance..62.",
+"Accommodation.and.food.services..72.", "Other.services..except.public.administration...81.", "Public.administration..91.", "Agriculture..forestry..fishing.and.hunting..11.mining.21", "Wholesale.and.retail.trade..41..44.45.", "Finance..insurance..real.estate..rental.and.leasing..52.53.", "Professional..scientific.and.technical.services..54.",  "Information..culture.and.recreation..51..71.","All.industries.ours")
 
 ```
 
@@ -211,7 +223,7 @@ eval(parse(text=
      )
 ```
 
-## Mapping industry names
+## Mapping industry names for the SIC codes to NAICS codes
 
 ```{r}
 #Changing column names in GDPsic_wide to match column names in GDP_wide
@@ -236,249 +248,98 @@ GDPsic_wide=GDPsic_wide %>% filter(Date >= "1975-12-01" & Date <= "1997-01-01")
 
 ```
 
-## Splicing GDP_sic and GDP_wide
-```{r}
-#Attempt 1
-GDP_splice = GDP_wide %>% 
-   arrange(Date) %>%
-eval(parse(text=
-     # view the line of code generated by running with the glue command       
-             glue(paste0('GDP_wide %>%arrange(Date)%>% mutate(', paste(paste0(GDP.variables,"_","g","=",GDP.variables, "/", lead(GDP.variables),collapse=","),')')
-                        ))))
-  #Attempt 2   
- GDP_wide_test <- GDP_wide %>%
- eval(parse(text= glue('GDP_wide_test = GDP_wide_test %>%arrange(Date)%>% mutate(paste("g", {GDP.variables}, sep= "_") = (as.numeric(paste0({GDP.variables}))/(as.numeric(paste0(lead{GDP.variables})))))')
-                        ))
-
-
-while (theDate >= end){
-df = df %>% mutate(paste({GDP.variables}, '.y') = case_when( (Date < as.Date("1997-01-01")) ~ paste({GDP.variables}, '.x')/lead(paste({GDP.variables}, '.x'))*lead(paste({GDP.variables}, '.y')),(Date >= as.Date("1997-01-01")) ~ Utilities..22..y))
-theDate <- theDate - 1}
-
-GDP_splice = GDP_wide %>% 
-   arrange(Date) %>%
-eval(parse(text=
-     # view the line of code generated by running with the glue command       
-             glue(paste0('df %>%arrange(Date)%>% mutate(', paste(paste0(GDP.variables, "=",GDP.variables, "/", lead(GDP.variables),'.x','*',lead(GDP.variables),'.y',collapse=","),')')
-                        ))))
-  mutate_all()
-```
-
-## following chunks testing
+## Splicing GDPsic_wide and GDP_wide - GDP_sic uses constant prices, and GDP_wide uses 2012 chained prices. To splice them, we need to shift the level of the GDPsic_wide to that of GDP_wide. 
+# We do this by creating a blank dataframe with the date range that we want (1976-1997).
 
 ```{r}
-
 dates<-seq(from=as.Date("1975-12-01","19%y-%m-%d"),to=as.Date("1996-12-01","19%y-%m-%d"),by="month")
 
-cols <- c('GEO', 'Date', 'year', 'month','Utilities..22.', 'Construction..23.', 'Manufacturing..31.33.', 'Transportation.and.warehousing..48.49.', 'Educational.services..61.', 'Health.care.and.social.assistance..62.', 'Accommodation.and.food.services..72.', 'Other.services..except.public.administration...81.', 'Public.administration..91.', 'Agriculture..forestry..fishing.and.hunting..11.mining.21', 'Wholesale.and.retail.trade..41..44.45.', 'Finance..insurance..real.estate..rental.and.leasing..52.53.', 'Professional..scientific.and.technical.services..54.', 'Information..culture.and.recreation..51..71.', 'All.industries.ours')
-
+cols <- c('GEO', 'Date', 'year', 'month',GDP.variables, 'All.industries.ours')
 
 GDP_blank <- data.frame(matrix(1, nrow = length(dates), ncol = 19))
 names(GDP_blank) <- cols
 GDP_blank$Date <- dates
 
 GDP_wide_test <- rbind(GDP_blank, GDP_wide)
+GDP_wide_test["GEO"] = "Canada"
 
+GDP_wide_test["year"] = format(GDP_wide_test["Date"],format="%Y")
+GDP_wide_test["month"] = format(GDP_wide_test["Date"],format="%m")
 
 ```
 
-## cont
-
+#Now we do the same to GDPsic_wide, but with a blank dataframe from 1997 onward. 
 ```{r}
-
 dates<-seq(from=as.Date("1997-02-01","19%y-%m-%d"),to=as.Date("2022-03-01","20%y-%m-%d"),by="month")
 
-cols <- c('GEO', 'Date', 'year', 'month','Utilities..22.', 'Construction..23.', 'Manufacturing..31.33.', 'Transportation.and.warehousing..48.49.', 'Educational.services..61.', 'Health.care.and.social.assistance..62.', 'Accommodation.and.food.services..72.', 'Other.services..except.public.administration...81.', 'Public.administration..91.', 'Agriculture..forestry..fishing.and.hunting..11.mining.21', 'Wholesale.and.retail.trade..41..44.45.', 'Finance..insurance..real.estate..rental.and.leasing..52.53.', 'Professional..scientific.and.technical.services..54.', 'Information..culture.and.recreation..51..71.', 'All.industries.ours')
-
+cols <- c('GEO', 'Date', 'year', 'month',GDP.variables, 'All.industries.ours')
 
 GDP_blank1 <- data.frame(matrix(1, nrow = length(dates), ncol = 19))
 names(GDP_blank1) <- cols
 GDP_blank1$Date <- dates
 
 GDPsic_wide_test <- rbind(GDPsic_wide,GDP_blank1)
+GDPsic_wide_test["GEO"] = "Canada"
 
+#GDPsic_wide_test["Date"] = GDP_wide_test["Date"]
+
+#format(GDPsic_wide_test["Date"], format="%y-%m-%d")
+
+GDPsic_wide_test["year"] = format(GDP_wide_test["Date"],format="%Y")
+GDPsic_wide_test["month"] = format(GDP_wide_test["Date"],format="%m")
 
 ```
 
-## cont
-
+#We use full_join to join the two tables together.
 ```{r}
+GDPfinal_wide <- GDPsic_wide_test %>%
+  full_join(GDP_wide_test, by=c("Date", "GEO", "year", "month"),all=TRUE)
 
-df <- rbind(GDPsic_wide_test,GDP_wide_test)
-
-df <- GDPsic_wide_test %>%
-  inner_join(GDP_wide_test, by=c("Date", "GEO", "year", "month"))
 ```
 
-## cont
-
+#Now we splice the data using a backward loop starting in 1997. 
 ```{r}
-# use glue to calculate productivity
-eval(parse(text= glue("df = df %>% 
-mutate({paste('final', {GDP.variables}, sep = '_')} = (as.numeric({paste0({GDP.variables},'.y')}) /(as.numeric({paste0({GDP.variables},'.x')})))*1000)")))
-```
-
-
-```{r}
-
 #(1) Looping backward from 2006-12-01:
+start     <- as.Date("97-01-01",format="%y-%m-%d")
+end   <- as.Date("75-12-01",format="%y-%m-%d")
 
-start     <- as.Date("1996-12-01",format="19%y-%m-%d")
-end   <- as.Date("1976-01-01",format="19%y-%m-%d")
+coltest = c(paste0(GDP.variables,".y",sep=""),"All.industries.ours.y")
+coltest1 = c(paste0(GDP.variables,".x",sep=""),"All.industries.ours.x")
 
-theDate <- start
+counter = 1
 
-
+for (counter in c(1:length(coltest))){
+  theDate <- start
 while (theDate >= end){
-  df = df %>% mutate({paste({GDP.variables},'.y',sep="")} == case_when( (Date < as.Date("1997-01-01")) ~ as.numeric({paste({GDP.variables}, '.x',sep="")})/lead(as.numeric({paste({GDP.variables},'.x',sep="")}))*lead(as.numeric({paste({GDP.variables}, '.y',sep="")})),(Date >= as.Date("1997-01-01")) ~ {paste({GDP.variables},'.y',sep="")}))
+  GDPfinal_wide = GDPfinal_wide %>% mutate(across(coltest[counter], ~ case_when( (Date < as.Date("97-01-01", format="%y-%m-%d")) ~ get(coltest1[counter])/lead(get(coltest1[counter]))*lead(get(coltest[counter])),(Date >= as.Date("97-01-01", format="%y-%m-%d")) ~ get(coltest[counter]))))
   theDate <- theDate - 1}
+}
+
+#Dropping unnecessary columns
+GDPfinal_wide <- GDPfinal_wide %>% select("GEO", "Date", "year", "month",(c(paste0(GDP.variables,".y",sep=""),"All.industries.ours.y")))
+
+colnames(GDPfinal_wide)<-gsub(".y","",colnames(GDPfinal_wide))
 
 ```
 
-
-
-```{r}
-#GDP_wide = GDP_wide %>% 
- #  arrange(Date) %>%
-#mutate(GDP_growth=All.industries..T001./lag(All.industries..T001.)-1) 
-
-#(1) Looping backward from 2006-12-01:
-
-start     <- as.Date("96-12-01",format="19%y-%m-%d")
-end   <- as.Date("76-01-01",format="19%y-%m-%d")
-
-theDate <- start
-
-while (theDate >= end){
-  GDP_test = GDP_test %>% mutate(Utilities..22. = case_when( (Date < as.Date("1997-01-01")) ~ 10,(Date >= as.Date("1997-01-01")) ~ Utilities..22.))
-  theDate <- theDate - 1}
-
-
-
-
-```
-
-
-## 2012 constant or chained dollars
-Note the decisions that need to be made for GDP include filtering on some variables.  Consider these price options:
+## We also need GDP by province by industry annual for calculating productivity later. Here we clean the table, 
 ```{r exploreGDP, cache=TRUE}
 
-GDPAnnual %>% 
-  filter(GEO =="Canada")%>%
-  select(Value)%>% table %>% names %>% sort
-
-
-
-```
-
-
-#Reducing down to a smaller set of of values from the NAICS hierarchy.
-
-```{r andrevalues, cache = TRUE}
-
-NAICS_higher_levels = c(
-"All industries [T001]",
-"Agriculture, forestry, fishing and hunting [11]",
-"Mining, quarrying, and oil and gas extraction [21]",	
-"Utilities [22]",
-"Construction [23]",
-"Manufacturing [31-33]",
-"Wholesale trade [41]",
-"Retail trade [44-45]",
-"Transportation and warehousing [48-49]",
-"Information and cultural industries [51]",
-"Finance and insurance [52]",
-"Real estate and rental and leasing [53]",
-"Professional, scientific and technical services [54]",
-"Management of companies and enterprises [55]",
-"Administrative and support, waste management and remediation services [56]",
-"Educational services [61]",
-"Health care and social assistance [62]",
-"Arts, entertainment and recreation [71]",
-"Accommodation and food services [72]",
-"Other services (except public administration) [81]",
-"Public administration [91]")
-
-GDP_wide = 
-  GDP %>% 
-  filter(Seasonal.adjustment=="Seasonally adjusted at annual rates")%>%
-  filter(Prices==dollars2use)%>%
-  filter(North.American.Industry.Classification.System..NAICS. %in%NAICS_higher_levels)%>%
-  select(GEO,Date,year, month,
-               North.American.Industry.Classification.System..NAICS.,
-               VALUE)%>%
-  pivot_wider(names_from= North.American.Industry.Classification.System..NAICS., 
-              values_from=VALUE) %>%  # puts each province into its own column
-  rename_all(make.names) # rebuilt the NAICS names
+GDPAnnual %>%
+select(Value)%>% table %>% names %>% sort
 
 GDPAnnual_wide = 
   GDPAnnual %>% 
-  filter(Value==dollars2use)%>%
+  filter(Value=="Chained (2012) dollars")%>%
   filter(North.American.Industry.Classification.System..NAICS. %in%NAICS_higher_levels)%>%
-  select(GEO,Date, 
+  select(GEO,Date,
                North.American.Industry.Classification.System..NAICS.,
                VALUE)%>%
   pivot_wider(names_from= North.American.Industry.Classification.System..NAICS., 
               values_from=VALUE) %>%  # puts each province into its own column
   rename_all(make.names) # rebuilt the NAICS names
 
-
-
-```
-
-Selecting SIC codes that can be matched with NAICS
-
-```{r andrevalues, cache = TRUE}
-SIC_NAICS_common = c(
-  "All industries",
-  "Agricultural and related services industries",
-  "Fishing and trapping industries",
-  "Logging and forestry industries",
-  "Mining (including milling), quarrying and oil well industries",
-  "Manufacturing industries",
-  "Construction industries",
-  "Transportation and storage industries",
-  "Communication industries",
-  "Other utility industries",
-  "Wholesale trade industries",
-  "Retail trade industries",
-  "Finance, insurance and real estate industries",
-  "Business services industries",
-  "Government service industries",
-  "Educational service industries",
-  "Health and social service industries",
-  "Accommodation, food and beverage service industries",
-  "Other service industries",
-  "Amusement and recreational service industries",
-  "Postal and courier service industries")
-  
-GDPsic_wide = 
-  GDPsic %>% 
-  filter(Seasonal.adjustment=="Seasonally adjusted")%>%
-  filter(Standard.Industrial.Classification..1980..SIC. %in% SIC_NAICS_common)%>%
-  select(GEO,Date,year, month,
-               Standard.Industrial.Classification..1980..SIC.,
-               VALUE)%>%
-  pivot_wider(names_from= Standard.Industrial.Classification..1980..SIC., 
-              values_from=VALUE) %>%  # puts each province into its own column
-  rename_all(make.names) # rebuilt the SIC names
-
-```
-
-
-## making THW and GDP comparable
-
-Some NAICS categories do not completely overlap across the THW and GDP datasets.  Combine categories accordingly.
-
-```{r}
-
-GDP_wide = GDP_wide %>%
-  mutate(Agriculture..forestry..fishing.and.hunting..11.mining.21   =  Agriculture..forestry..fishing.and.hunting..11. +Mining..quarrying..and.oil.and.gas.extraction..21.)%>%
-  mutate(Wholesale.and.retail.trade..41..44.45.                     = Wholesale.trade..41.+Retail.trade..44.45.)%>%
-  mutate(Finance..insurance..real.estate..rental.and.leasing..52.53. = Finance.and.insurance..52.+Real.estate.and.rental.and.leasing..53.)%>%
-  mutate(Information..culture.and.recreation..51..71.                = Arts..entertainment.and.recreation..71.+Information.and.cultural.industries..51.)
-
-
+#aggregating some NAICS
 GDPAnnual_wide = GDPAnnual_wide %>%
   mutate(Agriculture..forestry..fishing.and.hunting..11.mining.21   =  Agriculture..forestry..fishing.and.hunting..11. +Mining..quarrying..and.oil.and.gas.extraction..21.)%>%
   mutate(Wholesale.and.retail.trade..41..44.45.                     = Wholesale.trade..41.+Retail.trade..44.45.)%>%
@@ -486,132 +347,24 @@ GDPAnnual_wide = GDPAnnual_wide %>%
   mutate(Professional..scientific.and.technical.services..54.       = Management.of.companies.and.enterprises..55.+Administrative.and.support..waste.management.and.remediation.services..56.+Professional..scientific.and.technical.services..54.)%>%
   mutate(Information..culture.and.recreation..51..71.                = Arts..entertainment.and.recreation..71.+Information.and.cultural.industries..51.)
 
-
-GDPsic_wide = GDPsic_wide %>%
-  mutate(Agriculture..forestry..fishing.and.hunting..11.mining.21 = Agricultural.and.related.services.industries + Fishing.and.trapping.industries + Logging.and.forestry.industries + Mining..including.milling...quarrying.and.oil.well.industries)%>%
-  mutate(Wholesale.and.retail.trade..41..44.45. = Wholesale.trade.industries + Retail.trade.industries)%>%
-  mutate(Transportation.and.warehousing..48.49. = Transportation.and.storage.industries + Postal.and.courier.service.industries)%>%
-  mutate(Information..culture.and.recreation..51..71. = Communication.industries - Postal.and.courier.service.industries + Amusement.and.recreational.service.industries) %>%
-mutate(Other.service.industries = Other.service.industries - Amusement.and.recreational.service.industries)
-
-
-```
-
-### Sanity check for entire sample
-
-```{r}
-
-GDP.variables = c("Utilities..22.",
-      "Construction..23.",                                  
-      "Manufacturing..31.33.",  
-      "Transportation.and.warehousing..48.49.", 
-      "Educational.services..61.",                      
-      "Health.care.and.social.assistance..62.",
-      "Accommodation.and.food.services..72.",
-      "Other.services..except.public.administration...81.",
-      "Public.administration..91.",
-      "Agriculture..forestry..fishing.and.hunting..11.mining.21",
-      "Wholesale.and.retail.trade..41..44.45.",
-      "Finance..insurance..real.estate..rental.and.leasing..52.53.",
-      "Professional..scientific.and.technical.services..54.", 
-      "Information..culture.and.recreation..51..71.")
-
+#Obtaining a sum
 eval(parse(text=
      # view the line of code generated by running with the glue command        
-             glue(paste0("GDP_post1996 = GDP_wide %>%  mutate(All.industries.ours = ", paste({GDP.variables},collapse='+'),")"))
+             glue(paste0("GDPAnnual_wide = GDPAnnual_wide %>%  mutate(All.industries.ours = ", paste({GDP.variables},collapse='+'),")"))
            )
      )
 
+GDPAnnual_wide <- GDPAnnual_wide[c("GEO", "Date", GDPannual.variables)]
 
-#plot to make sure that our combination = the stated combination
-GDP_post1996%>% ggplot()+
-  geom_point(aes(x=All.industries.ours, y=All.industries..T001., colour = year))
+GDPAnnual_wide <- pivot_wider(GDPAnnual_wide, names_from = "GEO", values_from=c(GDPannual.variables))
 
-
-
-eval(parse(text=
-     # view the line of code generated by running with the glue command        
-             glue(paste0("GDPAnnual_post1996 = GDPAnnual_wide %>%  mutate(All.industries.ours = ", paste({GDP.variables},collapse='+'),")"))
-           )
-     )
-
-#now for GDPsic - replace these with SIC codes
-
-GDPSIC.variables = c("Manufacturing.industries", "Construction.industries", "Other.utility.industries", "Finance..insurance.and.real.estate.industries", "Business.services.industries", "Government.service.industries", "Educational.service.industries", "Health.and.social.service.industries", "Accommodation..food.and.beverage.service.industries", "Other.service.industries", "Agriculture..forestry..fishing.and.hunting..11.mining.21", "Wholesale.and.retail.trade..41..44.45.", "Transportation.and.warehousing..48.49.", "Information..culture.and.recreation..51..71.")
-
-eval(parse(text=
-     # view the line of code generated by running with the glue command        
-             glue(paste0("GDP_pre1997 = GDPsic_wide %>%  mutate(All.industries.ours = ", paste({GDPSIC.variables},collapse='+'),")"))
-           )
-     )
-
-#plot to make sure that our combination = the stated combination
-GDP_pre1997%>% ggplot()+
-  geom_point(aes(x=All.industries.ours, y=All.industries, colour = year))
-
-```
-
-##need to impute values for pre-2007 management - NAICS possible solutions include (1) grow it backwards at the rate of GDP growth (2) regress management 2007- on GDP, use estimated relationship to impute (3) estimate relationship between management and all industries 
-
-
-```{r}
-
-#(1)
-#value of management in dec 2006 x 1 - growth rate of gdp in January 2007 
-
-#create variable for GDP growth rate:
-GDP_post1996 = GDP_post1996 %>% 
-   arrange(Date) %>%
-mutate(GDP_growth=All.industries..T001./lag(All.industries..T001.)-1) 
-
-#(1) Looping backward from 2006-12-01:
-
-start     <- as.Date("06-12-01",format="%y-%m-%d")
-end   <- as.Date("97-01-01",format="%y-%m-%d")
-
-theDate <- start
-
-while (theDate >= end){
-  GDP_post1996 = GDP_post1996 %>% mutate(Management.of.companies.and.enterprises..55. = case_when( (Date < as.Date("2007-01-01")) ~ lead(Management.of.companies.and.enterprises..55.)*(1-lead(GDP_growth)),(Date >= as.Date("2007-01-01")) ~ Management.of.companies.and.enterprises..55.))
-  theDate <- theDate - 1}
-
-GDP_post1996 = GDP_post1996 %>% 
- mutate(Professional..scientific.and.technical.services..54.       = Management.of.companies.and.enterprises..55.+Administrative.and.support..waste.management.and.remediation.services..56.+Professional..scientific.and.technical.services..54.)
-
- eval(parse(text=
-     # view the line of code generated by running with the glue command        
-             glue(paste0("GDP_post1996 = GDP_post1996 %>%  mutate(All.industries.ours = ", paste({GDP.variables},collapse='+'),")"))
-           )
-     )
- 
-
-
-#we now have a complete GDP_post1996 table with no NA values
- 
-
- 
-```
-
-
-### Check which variables were now left out from crafting our total
-Compare these to the list in the previous chunk that was used to build **totals.hours.ours**.  Note that above, some of these _leftover_ variables were already used (eg. mining + agriculture).
-
-```{r}
-# for book keeping
-setdiff(colnames(GDP_post1996),GDP.variables)
-setdiff(colnames(GDP_pre1997),GDPSIC.variables)
 ```
 
 ## Save the modified data sets:
+
 ```{r}
+GDPfinal_wide       %>% write_csv(file = paste0(location,"1.GDPfinal_wide.csv"))
+GDPAnnual_wide %>% write_csv(file = paste0(location,"1.GDPAnnual_wide.csv"))
 
-GDP_post1996       %>% write_csv(file = paste0(location,"1.c-Data_From_Cansim-GDP.csv"))
-GDPAnnual_post1996 %>% write_csv(file = paste0(location,"1.c-Data_From_Cansim-GDPAnnual.csv"))
-GDP_pre1997       %>% write_csv(file = paste0(location,"1.c-Data_From_Cansim-GDPretro.csv"))
-
-save("GDP_post1996", "GDPAnnual_post1996", "GDP_pre1997", "GDP.variables", "GDPSIC.variables",
-file = paste0(location,"1.c-Data_From_Cansim-GDP_and_total_hours_worked.Rdata"))
+save("GDPfinal_wide", "GDPAnnual_wide", file = paste0(location,"1.GDP.Rdata"))
 ```
-
-
-

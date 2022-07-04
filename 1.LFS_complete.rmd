@@ -1,0 +1,395 @@
+---
+title: "1.LFS"
+author: "Raven Wheesk"
+date: "6/17/2022"
+output: html_document
+---
+
+# Objective: Create seasonal factors that can be used to seasonally adjust our provincial industry GDP estimates. Seasonally adjusted total hours worked is not available by province, so we create a national seasonal factor for total hours worked, and a provincial seasonal factor for employment. 
+
+# Data Provider
+
+Statistics Canada hosts a large set of socio-economic [datasets](https://www150.statcan.gc.ca/n1//en/type/data?MM=1#tables). 
+
+
+# Basic libraries and R version
+
+```{R, message = FALSE, warning = FALSE}
+library(tidyverse) # for its nice flow.
+library(cansim) #for pulling Stat Can socioeconomic data
+library(lubridate) # for dealing with dates
+library(GGally) # for pairs plot
+library(ggpubr) # for putting a regression equation onto a ggplot figure
+library(glue)   # used for dynamic variable construction
+library(dplyr)  # for data manipulation
+
+# set up data location:
+location = "C:/users/wher/OneDrive - Bank of Canada/MyDocs/Google_Climate_Dataset/"
+
+```
+
+```{R version}
+version
+```
+
+# Loading data
+```{r loaddata, echo = FALSE}
+# loading from here to avoid re-downloading
+load("Total_hours_and_GDP.Rdata")
+```
+
+# Defining variable lists
+```{r}
+GDP.variables = c("Utilities..22.",
+      "Construction..23.",                                  
+      "Manufacturing..31.33.",  
+      "Transportation.and.warehousing..48.49.", 
+      "Educational.services..61.",                      
+      "Health.care.and.social.assistance..62.",
+      "Accommodation.and.food.services..72.",
+      "Other.services..except.public.administration...81.",
+      "Public.administration..91.",
+      "Agriculture..forestry..fishing.and.hunting..11.mining.21",
+      "Wholesale.and.retail.trade..41..44.45.",
+      "Finance..insurance..real.estate..rental.and.leasing..52.53.",
+      "Professional..scientific.and.technical.services..54.", 
+      "Information..culture.and.recreation..51..71.")
+
+#This includes our total, "All.industries.ours"
+GDP.variables1 = c("Utilities..22.", "Construction..23.", "Manufacturing..31.33.",    "Transportation.and.warehousing..48.49.", "Educational.services..61.", "Health.care.and.social.assistance..62.","Accommodation.and.food.services..72.", "Other.services..except.public.administration...81.", "Public.administration..91.", "Agriculture..forestry..fishing.and.hunting..11.mining.21", "Wholesale.and.retail.trade..41..44.45.", "Finance..insurance..real.estate..rental.and.leasing..52.53.", "Professional..scientific.and.technical.services..54.",  "Information..culture.and.recreation..51..71.","All.industries.ours")
+
+
+```
+
+# We need to create a seasonal factor for employment from the seasonally adjusted and non-seasonally adjusted data. First, we need to clean up the tables from Cansim. 
+```{r, widendata,  cache = TRUE}
+# Employment - seasonally adjusted
+
+EMPSA_wide = EMP%>% 
+  filter(Statistics == "Estimate")%>%
+  filter(Data.type == "Seasonally adjusted")%>%
+  #filter(GEO != "Canada")%>% # since the Canada value will be a type of weighted average
+  select(GEO,Date,year, month,
+               North.American.Industry.Classification.System..NAICS.,
+               VALUE)%>%
+  pivot_wider(names_from= North.American.Industry.Classification.System..NAICS.,
+              values_from=VALUE) %>%  # puts each province into its own column
+  rename_all(make.names) # rebuilt the province names
+
+# Aggregating agriculture and forestry, mining, oil and gas to match with industries used throughout 
+
+EMPSA_wide = EMPSA_wide%>% mutate(Agriculture..forestry..fishing.and.hunting..11.mining.21   =  Agriculture..111.112..1100..1151.1152. +Forestry..fishing..mining..quarrying..oil.and.gas..21..113.114..1153..2100.)%>%
+mutate(Professional..scientific.and.technical.services..54.   =  Professional..scientific.and.technical.services..54. +Business..building.and.other.support.services..55.56.)
+
+#Dropping unnecessary columns
+EMPSA_wide <- EMPSA_wide %>% select("GEO", "Date", (contains({GDP.variables})))
+
+# Obtain a total across all industries
+eval(parse(text=
+             glue(paste0("EMPSA_wide = EMPSA_wide %>% mutate(All.industries.ours = ", paste({GDP.variables},collapse='+'),")"))
+           )
+     )
+
+# Pivot into a wide table for manipulations later
+EMPSA_wide <- EMPSA_wide[c("GEO", "Date", GDP.variables1)]
+EMPSA_wide <- pivot_wider(EMPSA_wide, names_from = "GEO", values_from=c(GDP.variables1))
+
+
+# Employment - seasonally adjusted and non-seasonally adjusted
+
+EMPNSA_wide = EMP%>%
+  filter(Statistics == "Estimate")%>%
+  filter(Data.type == "Unadjusted")%>%
+  #filter(GEO != "Canada")%>% # since the Canada value will be a type of weighted average
+  select(GEO,Date,year, month,
+               North.American.Industry.Classification.System..NAICS.,
+               VALUE)%>%
+  pivot_wider(names_from= North.American.Industry.Classification.System..NAICS.,
+              values_from=VALUE) %>%  # puts each province into its own column
+  rename_all(make.names) # rebuilt the province names
+
+# Aggregating agriculture and forestry, mining, oil and gas to match with industries used throughout 
+EMPNSA_wide = EMPNSA_wide%>% mutate(Agriculture..forestry..fishing.and.hunting..11.mining.21   =  Agriculture..111.112..1100..1151.1152. +Forestry..fishing..mining..quarrying..oil.and.gas..21..113.114..1153..2100.)%>%
+mutate(Professional..scientific.and.technical.services..54.   =  Professional..scientific.and.technical.services..54. +Business..building.and.other.support.services..55.56.)
+  
+#Dropping unnecessary columns
+EMPNSA_wide <- EMPNSA_wide %>% select("GEO", "Date", (contains({GDP.variables})))
+
+# Obtain a total across all industries
+eval(parse(text=
+             glue(paste0("EMPNSA_wide = EMPNSA_wide %>% mutate(All.industries.ours = ", paste({GDP.variables},collapse='+'),")"))
+           )
+     )
+
+# Pivot into a wide table for manipulations later
+EMPNSA_wide <- EMPNSA_wide[c("GEO", "Date", GDP.variables1)]
+EMPNSA_wide <- pivot_wider(EMPNSA_wide, names_from = "GEO", values_from=c(GDP.variables1))
+
+```
+
+## Here we take the seasonally adjusted and non-seasonally adjusted employment data, and create a seasonal factor for employment (EMPSF=EMPSA/EMPNSA)
+
+```{r}
+EMPSA1 <- subset (EMPSA_wide, select = -c(Date))
+EMPNSA1 <- subset (EMPNSA_wide, select = -c(Date))
+info_columns <- subset (EMPSA_wide, select = c(Date))
+
+EMPSF_wide <- cbind(info_columns, EMPSA1/EMPNSA1)
+
+EMPSF_wide <- subset(EMPSF_wide, Date > as.Date("1986-12-01"))
+```
+
+
+
+### We want to create a seasonal factor using total hours worked. The seasonally adjusted series is not available for provinces, so we calculate a national seasonal factor.
+#First, we clean the THW tables from Cansim.
+```{r}
+##### Canada THW SA
+THWSA_CAN_wide = THWSA%>% 
+  filter(Statistics == "Estimate")%>%
+  select(GEO,Date,year, month,
+               North.American.Industry.Classification.System..NAICS.,
+               VALUE)%>%
+  pivot_wider(names_from= North.American.Industry.Classification.System..NAICS.,
+              values_from=VALUE) %>%  # puts each province into its own column
+  rename_all(make.names) # rebuilt the province names
+
+# Aggregate agriculture and mining, oil and gas
+THWSA_CAN_wide = THWSA_CAN_wide%>% mutate(Agriculture..forestry..fishing.and.hunting..11.mining.21   =  Agriculture..111.112..1100..1151.1152. +Forestry..fishing..mining..quarrying..oil.and.gas..21..113.114..1153..2100.)%>%
+mutate(Professional..scientific.and.technical.services..54.   =  Professional..scientific.and.technical.services..54. +Business..building.and.other.support.services..55.56.)
+  
+#Dropping unnecessary columns
+THWSA_CAN_wide <- THWSA_CAN_wide %>% select("GEO", "Date", (contains({GDP.variables})))
+
+#Obtain a total for hours worked
+eval(parse(text=glue(paste0("THWSA_CAN_wide = THWSA_CAN_wide %>% mutate(All.industries.ours = ", paste({GDP.variables},collapse='+'),")"))
+           )
+     )
+
+#Dropping unnecessary columns
+THWSA_CAN_wide <- THWSA_CAN_wide %>% select("Date",GDP.variables,"All.industries.ours")
+
+colnames(THWSA_CAN_wide) <- paste(colnames(THWSA_CAN_wide), "Canada", sep = "_")
+names(THWSA_CAN_wide)[names(THWSA_CAN_wide) == "Date_Canada"] <- "Date"
+THWSA_CAN_wide
+
+THWSA_CAN_wide <- subset(THWSA_CAN_wide, Date > as.Date("1986-12-01"))
+
+##############################################
+##### Canada THW NSA
+
+THWNSA_CAN_wide = THW%>%
+  filter(GEO == "Canada") %>% 
+  filter(Sex == "Both sexes") %>% 
+  filter(Class.of.worker == "Total employed")%>%
+  filter(Actual.hours.worked == "Total actual hours (main job)")%>%
+  select(GEO,Date,year, month,
+  North.American.Industry.Classification.System..NAICS., VALUE)%>%
+  pivot_wider(names_from= North.American.Industry.Classification.System..NAICS.,
+              values_from=VALUE) %>%  # puts each province into its own column
+  rename_all(make.names) # rebuilt the province names
+
+# Aggregate agriculture and mining, oil and gas
+THWNSA_CAN_wide = THWNSA_CAN_wide%>% mutate(Agriculture..forestry..fishing.and.hunting..11.mining.21   =  Agriculture..111.112..1100..1151.1152. +Forestry..fishing..mining..quarrying..oil.and.gas..21..113.114..1153..2100.)%>%
+mutate(Professional..scientific.and.technical.services..54.   =  Professional..scientific.and.technical.services..54. +Business..building.and.other.support.services..55.56.)
+  
+#Dropping unnecessary columns
+THWNSA_CAN_wide <- THWNSA_CAN_wide %>% select("GEO", "Date", (contains({GDP.variables})))
+
+# Obtain a total
+eval(parse(text=glue(paste0("THWNSA_CAN_wide = THWNSA_CAN_wide %>% mutate(All.industries.ours = ", paste({GDP.variables},collapse='+'),")"))
+           )
+     )
+
+#Dropping unnecessary columns
+THWNSA_CAN_wide <- THWNSA_CAN_wide %>% select("Date",GDP.variables,"All.industries.ours")
+
+colnames(THWNSA_CAN_wide) <- paste(colnames(THWNSA_CAN_wide), "Canada", sep = "_")
+names(THWNSA_CAN_wide)[names(THWNSA_CAN_wide) == "Date_Canada"] <- "Date"
+THWNSA_CAN_wide
+
+```
+
+# Here we calculate a seasonal factor for Canada THW, from 1987 onward
+```{r}
+##### Canada THW SF 1987 onward
+
+THWSA_CAN_wide1 <- subset (THWSA_CAN_wide, select = -c(Date))
+THWNSA_CAN_wide1 <- subset (THWNSA_CAN_wide, select = -c(Date))
+info_columns <- subset (THWSA_CAN_wide, select = c(Date))
+
+THWSF_CAN_wide <- cbind(info_columns, THWSA_CAN_wide1/THWNSA_CAN_wide1)
+
+THWSF_CAN_wide <- subset(THWSF_CAN_wide, Date > as.Date("1986-12-01"))
+
+```
+
+# We will apply our seasonal factors to the unadjusted THW, so here we clean up that table
+```{r}
+
+THWNSA_wide = THW%>%
+  filter(Sex == "Both sexes")%>% 
+  filter(Class.of.worker == "Total employed")%>%
+  filter(Actual.hours.worked == "Total actual hours (main job)")%>%
+  select(GEO,Date,year, month,
+               North.American.Industry.Classification.System..NAICS.,
+               VALUE)%>%
+  pivot_wider(names_from= North.American.Industry.Classification.System..NAICS.,
+              values_from=VALUE) %>%  # puts each province into its own column
+  rename_all(make.names) # rebuilt the province names
+
+THWNSA_wide = THWNSA_wide%>% mutate(Agriculture..forestry..fishing.and.hunting..11.mining.21   =  Agriculture..111.112..1100..1151.1152. +Forestry..fishing..mining..quarrying..oil.and.gas..21..113.114..1153..2100.)%>%
+mutate(Professional..scientific.and.technical.services..54.   =  Professional..scientific.and.technical.services..54. +Business..building.and.other.support.services..55.56.)
+  
+#Dropping unnecessary columns
+THWNSA_wide <- THWNSA_wide %>% select("GEO", "Date", (contains({GDP.variables})))
+
+#Obtain a total
+eval(parse(text=
+             glue(paste0("THWNSA_wide = THWNSA_wide %>% mutate(All.industries.ours = ", paste({GDP.variables},collapse='+'),")"))
+           )
+     )
+
+#Create a wide table for THW NSA
+THWNSA_wide <- THWNSA_wide[c("GEO", "Date", GDP.variables1)]
+THWNSA_wide <- pivot_wider(THWNSA_wide, names_from = "GEO", values_from=c(GDP.variables1))
+
+####There are some missing values for some industries and provinces. We can impute them using the previous year's growth rate, i.e. Jan 1990 = dec 1989*(1+Jan89/Dec88).
+
+THWNSA_wide <- THWNSA_wide                                              
+for(j in 1:ncol(THWNSA_wide)){
+  for(i in 1:nrow(THWNSA_wide)) {                                   
+  THWNSA_wide[i , j] <- ifelse(is.na(THWNSA_wide[i, j]), THWNSA_wide[(i-1),j]*(1+(THWNSA_wide[(i-12),j]/THWNSA_wide[(i-13),j]-1)), THWNSA_wide[i ,j]) 
+  }
+}
+
+```
+
+# Now we want to create our province-level seasonally-adjusted THW dataframe by multiplying the provincial non-seasonally-adjusted measure, by a ratio of our THW seasonal factor (for Canada) and the relative seasonal factors for EMP:
+##          (THWNSA_wide province j industry i) * 
+##          (THWSF_CAN_wide Canada industry i) / 
+##          (EMPSF_wide province j industry i / EMPSF_wide Canada industry i)
+
+
+# First, create a ratio of the seasonal factors for each province and industry and each industry for Canada:
+##(EMPSF_wide province j industry i / EMPSF_wide Canada industry i)
+
+```{r}
+#Need to create a dataframe with the seasonal factor for Canada industry i that has equal dimensions to the provincial dataframes.
+EMPSF_ratio <- EMPSF_wide
+EMPSF_ratio <- EMPSF_ratio %>% select(-contains("Date"))
+
+Date_column <- EMPSF_wide %>% select(contains("Date"))
+EMPSF_ratio_CAN <- EMPSF_wide %>% select(contains("Canada"))
+
+EMPSF_ratio1 <- data.frame(do.call(cbind,rep(EMPSF_ratio_CAN, each=11)), check.names = F)
+
+EMPSF_ratio2 <- EMPSF_ratio/EMPSF_ratio1
+
+
+####Imputing missing values using the previous year's growth rate.
+
+EMPSF_ratio2 <- EMPSF_ratio2                                              
+for(j in 1:ncol(EMPSF_ratio2)){
+  for(i in 1:nrow(EMPSF_ratio2)) {                                   
+  EMPSF_ratio2[i , j] <- ifelse(is.na(EMPSF_ratio2[i, j]), EMPSF_ratio2[(i-1),j]*(1+(EMPSF_ratio2[(i-12),j]/EMPSF_ratio2[(i-13),j]-1)), EMPSF_ratio2[i ,j]) 
+  }
+}
+
+
+EMPSF_ratio <- cbind(Date_column, EMPSF_ratio2)
+
+```
+
+##(THWSF_CAN_wide Canada industry i) - need to create a dataframe with the seasonal factor for Canada industry i that has equal dimensions to the provincial dataframes.
+
+```{r}
+
+THWSF_CAN_extend <- THWSF_CAN_wide
+THWSF_CAN_extend <- THWSF_CAN_extend %>% select(-contains("Date"))
+
+THWSF_CAN_extend <- THWSF_CAN_wide %>% select(contains("Canada"))
+
+THWSF_CAN_extend <- data.frame(do.call(cbind,rep(THWSF_CAN_extend, each=11)), check.names = F)
+
+```
+
+
+## Now we calculate our new THWSA_wide using our seasonal adjustment: THWSA_wide = THWNSA_wide*THWSF_CAN_extend/EMPSF_ratio
+
+```{r}
+
+THWNSA_wide <- THWNSA_wide %>% select(-contains("Date"))
+EMPSF_ratio <- EMPSF_ratio %>% select(-contains("Date"))
+
+
+THWSA_wide = THWNSA_wide*THWSF_CAN_extend*EMPSF_ratio
+
+THWSA_wide <- cbind(Date_column, THWSA_wide)
+
+
+
+col1 = c(paste0(GDP.variables,"_Canada",sep=""))
+col2 = c(GDP.variables)
+counter = 1
+for (counter in c(1:length(col1))){
+  THWSA_wide = THWSA_wide %>% mutate(across(col1[counter], ~ rowSums(select(THWSA_wide,contains({col2[counter]})))-select(THWSA_wide,c(paste({col2[counter]},"_Canada",sep="")))))
+
+}
+
+#The above creates a dataframe with the Canada columns nested within the THWSA_wide dataframe. This unnests it:
+
+   unnest_dataframes <- function(x) {
+
+        y <- do.call(data.frame, x)
+
+        if("data.frame" %in% sapply(y, class)) unnest_dataframes(y)
+
+        y
+
+    }
+
+    THWSA_wide <- unnest_dataframes(THWSA_wide)
+
+#fixing the names  
+names(THWSA_wide) <- gsub("Newfoundland.and.Labrador", "Newfoundland and Labrador", names(THWSA_wide))
+names(THWSA_wide) <- gsub("Prince.Edward.Island", "Prince Edward Island", names(THWSA_wide))
+names(THWSA_wide) <- gsub("Nova.Scotia", "Nova Scotia", names(THWSA_wide))
+names(THWSA_wide) <- gsub("New.Brunswick", "New Brunswick", names(THWSA_wide))
+names(THWSA_wide) <- gsub("British.Columbia", "British Columbia", names(THWSA_wide))
+
+
+```
+
+
+##We will need the labour share of hours worked by sector and provinces for our estimated GDP. Here we calculate it:
+
+```{r}
+# Need a dataframe containing only Canada values
+THWSA_Canada <- THWSA_wide
+THWSA_Canada <- THWSA_Canada %>% select(-contains("Date"))
+THWSA_Canada <- THWSA_Canada %>% select(contains("Canada"))
+
+THWSA_Canada <- data.frame(do.call(cbind,rep(THWSA_Canada, each=11)), check.names = F)
+
+THWSA_wide <- THWSA_wide %>% select(-contains("Date"))
+
+THWSA_share = THWSA_wide/THWSA_Canada
+
+THWSA_share <- cbind(Date_column, THWSA_share)
+
+THWSA_wide <- cbind(Date_column, THWSA_wide)
+
+
+```
+
+
+# Saving the outputs:
+```{r}
+
+THWSA_wide       %>% write_csv(file = paste0(location,"1.LFS.csv"))
+THWSA_share       %>% write_csv(file = paste0(location,"1.LFS_share.csv"))
+
+save("THWSA_wide","THWSA_share", THWSA_share,file = paste0(location,"1.LFS.Rdata"))
+```
+
